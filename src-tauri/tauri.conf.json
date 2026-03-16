@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TeamUpdaterV3",
+  "version": "0.1.0",
+  "identifier": "com.cusp.teamupdaterv3",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"]
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TeamUpdater V3",
+        "width": 1480,
+        "height": 980,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
