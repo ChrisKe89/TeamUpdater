@@ -5,7 +5,10 @@ import { buildDefaultSettings, getFolderDefinitions, mergeSettings } from './lib
 import {
   detectShareFileDrives,
   isDesktopRuntime,
+  loadRunHistory,
   loadSettings,
+  previewSyncPlan,
+  quitApp,
   requestSyncStop,
   saveSettings,
   startSync,
@@ -15,7 +18,10 @@ import type {
   DetectDrivesResponse,
   FolderDefinition,
   NavView,
+  RunAuditRecord,
   SyncEvent,
+  SyncPlan,
+  SyncPlanAction,
   SyncRunState,
 } from './types'
 
@@ -44,18 +50,45 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(buildDefaultSettings())
   const [draftSettings, setDraftSettings] = useState<AppSettings>(buildDefaultSettings())
   const [runState, setRunState] = useState<SyncRunState>(initialRunState)
+  const [previewPlan, setPreviewPlan] = useState<SyncPlan | null>(null)
+  const [historyRecords, setHistoryRecords] = useState<RunAuditRecord[]>([])
   const [appError, setAppError] = useState<string | null>(null)
+  const [appNotice, setAppNotice] = useState<string | null>(null)
   const [isInitializing, setIsInitializing] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isPreviewing, setIsPreviewing] = useState(false)
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
+    const refreshHistoryFromRuntime = async () => {
+      if (!isDesktopRuntime || cancelled) {
+        return
+      }
+
+      try {
+        const records = await loadRunHistory()
+        if (!cancelled) {
+          setHistoryRecords(records)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAppError(getErrorMessage(error, 'Unable to load run history.'))
+        }
+      } finally {
+        if (!cancelled) {
+          setIsHistoryLoading(false)
+        }
+      }
+    }
+
     const init = async () => {
       try {
-        const [loadedSettings, detectedDrives] = await Promise.all([
+        const [loadedSettings, detectedDrives, loadedHistory] = await Promise.all([
           loadSettings(),
           detectShareFileDrives(),
+          loadRunHistory(),
         ])
 
         if (cancelled) {
@@ -66,6 +99,7 @@ function App() {
         setDriveInfo(detectedDrives)
         setSettings(mergedSettings)
         setDraftSettings(mergedSettings)
+        setHistoryRecords(loadedHistory)
       } catch (error) {
         if (!cancelled) {
           setAppError(getErrorMessage(error, 'Unable to initialise the app.'))
@@ -73,6 +107,7 @@ function App() {
       } finally {
         if (!cancelled) {
           setIsInitializing(false)
+          setIsHistoryLoading(false)
         }
       }
     }
@@ -80,6 +115,14 @@ function App() {
     const unlistenPromise = isDesktopRuntime
       ? listen<SyncEvent>('sync://event', (event) => {
           setRunState((previous) => reduceSyncEvent(previous, event.payload))
+
+          if (
+            event.payload.kind === 'run_completed' ||
+            event.payload.kind === 'run_stopped' ||
+            event.payload.kind === 'run_failed'
+          ) {
+            void refreshHistoryFromRuntime()
+          }
         })
       : Promise.resolve(() => undefined)
 
@@ -90,6 +133,15 @@ function App() {
       void unlistenPromise.then((unlisten) => unlisten())
     }
   }, [])
+
+  useEffect(() => {
+    if (!appNotice) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => setAppNotice(null), 2400)
+    return () => window.clearTimeout(timeoutId)
+  }, [appNotice])
 
   const selectedDrive = draftSettings.selectedDrive
   const selectableDrives = useMemo(() => {
@@ -103,6 +155,14 @@ function App() {
     () => driveInfo.candidates.find((candidate) => candidate.letter === selectedDrive) ?? null,
     [driveInfo.candidates, selectedDrive],
   )
+  const previewActions = useMemo(() => {
+    const actions = previewPlan?.actions ?? []
+    return {
+      copies: actions.filter((action) => action.action === 'copy'),
+      deletes: actions.filter((action) => action.action === 'delete'),
+      skippedDeletes: actions.filter((action) => action.action === 'skip_delete'),
+    }
+  }, [previewPlan])
 
   const driveStatus = useMemo(() => {
     if (!selectedDrive) {
@@ -132,11 +192,13 @@ function App() {
   const persistSettings = async (nextSettings: AppSettings) => {
     setIsSaving(true)
     setAppError(null)
+    setAppNotice(null)
 
     try {
       await saveSettings(nextSettings)
       setSettings(nextSettings)
       setDraftSettings(nextSettings)
+      setAppNotice('Settings saved.')
     } catch (error) {
       setAppError(getErrorMessage(error, 'Unable to save settings.'))
     } finally {
@@ -161,6 +223,24 @@ function App() {
     }
   }
 
+  const refreshHistory = async () => {
+    if (!isDesktopRuntime) {
+      return
+    }
+
+    setIsHistoryLoading(true)
+    setAppError(null)
+
+    try {
+      const records = await loadRunHistory()
+      setHistoryRecords(records)
+    } catch (error) {
+      setAppError(getErrorMessage(error, 'Unable to load run history.'))
+    } finally {
+      setIsHistoryLoading(false)
+    }
+  }
+
   const handleFolderToggle = (folder: FolderDefinition) => {
     if (folder.isMandatory) {
       return
@@ -182,12 +262,34 @@ function App() {
     }))
   }
 
+  const handlePreview = async () => {
+    if (!canStartSync) {
+      return
+    }
+
+    setIsPreviewing(true)
+    setAppError(null)
+    setAppNotice(null)
+
+    try {
+      const nextSettings = mergeSettings(draftSettings, driveInfo.autoSelected)
+      const plan = await previewSyncPlan(nextSettings)
+      setPreviewPlan(plan)
+      setActiveView('preview')
+    } catch (error) {
+      setAppError(getErrorMessage(error, 'Unable to build the sync preview.'))
+    } finally {
+      setIsPreviewing(false)
+    }
+  }
+
   const handleStartSync = async () => {
     if (!canStartSync) {
       return
     }
 
     setAppError(null)
+    setAppNotice(null)
     setRunState({
       ...initialRunState,
       isRunning: true,
@@ -219,6 +321,20 @@ function App() {
     }
   }
 
+  const handleQuit = async () => {
+    if (runState.isRunning) {
+      const shouldQuit = window.confirm(
+        'A sync is currently running. Quit the app anyway?',
+      )
+
+      if (!shouldQuit) {
+        return
+      }
+    }
+
+    await quitApp()
+  }
+
   const handleApplySettings = async () => {
     await persistSettings(mergeSettings(draftSettings, driveInfo.autoSelected))
   }
@@ -226,6 +342,7 @@ function App() {
   const handleResetSettings = () => {
     setDraftSettings(settings)
     setAppError(null)
+    setAppNotice(null)
   }
 
   return (
@@ -241,9 +358,34 @@ function App() {
         </div>
 
         <nav className="nav">
-          <NavButton active={activeView === 'home'} description="Run updates and watch live activity." label="Home" onClick={() => setActiveView('home')} />
-          <NavButton active={activeView === 'folder-selection'} description="Choose which folders mirror to C:\\." label="Folder Selection" onClick={() => setActiveView('folder-selection')} />
-          <NavButton active={activeView === 'firmware-retention'} description="Protect deletes under Firmware paths." label="Firmware Retention" onClick={() => setActiveView('firmware-retention')} />
+          <NavButton
+            active={activeView === 'home'}
+            label="Home"
+            onClick={() => setActiveView('home')}
+          />
+          <NavButton
+            active={activeView === 'preview'}
+            label="Preview"
+            onClick={() => setActiveView('preview')}
+          />
+          <NavButton
+            active={activeView === 'history'}
+            label="History"
+            onClick={() => {
+              setActiveView('history')
+              void refreshHistory()
+            }}
+          />
+          <NavButton
+            active={activeView === 'folder-selection'}
+            label="Folder Selection"
+            onClick={() => setActiveView('folder-selection')}
+          />
+          <NavButton
+            active={activeView === 'firmware-retention'}
+            label="Firmware Retention"
+            onClick={() => setActiveView('firmware-retention')}
+          />
         </nav>
 
         <div className="runtime-card">
@@ -252,6 +394,11 @@ function App() {
           <span className="runtime-copy">
             Browser mode can preview the UI, but sync actions require the Tauri backend.
           </span>
+          {isDesktopRuntime ? (
+            <button className="secondary-button sidebar-quit" onClick={() => void handleQuit()} type="button">
+              Quit
+            </button>
+          ) : null}
         </div>
       </aside>
 
@@ -299,21 +446,54 @@ function App() {
         </header>
 
         {appError ? <div className="banner banner--error">{appError}</div> : null}
+        {appNotice ? <div className="banner banner--success">{appNotice}</div> : null}
 
         {isInitializing ? (
           <section className="panel panel--loading">
             <div className="spinner" />
-            <p>Loading ShareFile configuration…</p>
+            <p>Loading ShareFile configuration...</p>
           </section>
         ) : null}
 
         {!isInitializing && activeView === 'home' ? (
-          <section className="view-grid">
+          <section className="view-grid view-grid--home">
             <div className="stats-grid">
-              <StatCard detail="Mandatory folders stay enabled at all times." label="Selected folders" value={enabledFolderCount.toString()} />
-              <StatCard detail={runState.summary?.copiedBytesLabel ?? 'Awaiting next sync run'} label="New or updated files" value={runState.copiedCount.toString()} />
-              <StatCard detail={draftSettings.firmwareRetentionEnabled ? 'Firmware retention enabled' : 'Strict mirror mode'} label="Removed files" value={runState.deletedCount.toString()} />
-              <StatCard detail={runState.lastMessage} label="Run state" value={runState.isRunning ? 'Running' : 'Idle'} />
+              <StatCard
+                detail="Mandatory folders stay enabled at all times."
+                label="Selected folders"
+                value={enabledFolderCount.toString()}
+              />
+              <StatCard
+                detail={
+                  previewPlan?.summary.totalCopyBytesLabel ??
+                  runState.summary?.copiedBytesLabel ??
+                  'Preview the next run to estimate transfer size'
+                }
+                label="Planned copies"
+                value={
+                  previewPlan?.summary.copyCount?.toString() ??
+                  runState.summary?.plannedCopyFiles?.toString() ??
+                  '0'
+                }
+              />
+              <StatCard
+                detail={
+                  draftSettings.firmwareRetentionEnabled
+                    ? 'Firmware retention enabled'
+                    : 'Strict mirror mode'
+                }
+                label="Planned deletes"
+                value={
+                  previewPlan?.summary.deleteCount?.toString() ??
+                  runState.summary?.plannedDeleteFiles?.toString() ??
+                  '0'
+                }
+              />
+              <StatCard
+                detail={runState.lastMessage}
+                label="Run state"
+                value={runState.isRunning ? 'Running' : 'Idle'}
+              />
             </div>
 
             <section className="panel highlight-panel">
@@ -335,16 +515,34 @@ function App() {
               </div>
 
               <div className="action-row">
-                <button className="primary-button" disabled={!canStartSync} onClick={handleStartSync} type="button">
+                <button
+                  className="ghost-button"
+                  disabled={!canStartSync || isPreviewing}
+                  onClick={handlePreview}
+                  type="button"
+                >
+                  {isPreviewing ? 'Previewing...' : 'Preview changes'}
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={!canStartSync}
+                  onClick={handleStartSync}
+                  type="button"
+                >
                   Update
                 </button>
-                <button className="secondary-button" disabled={!runState.isRunning} onClick={handleStopSync} type="button">
+                <button
+                  className="secondary-button"
+                  disabled={!runState.isRunning}
+                  onClick={handleStopSync}
+                  type="button"
+                >
                   Stop
                 </button>
               </div>
             </section>
 
-            <section className="panel log-panel">
+            <section className="panel log-panel log-panel--compact">
               <div className="panel-heading">
                 <div>
                   <p className="eyebrow">Transfer Feed</p>
@@ -352,7 +550,10 @@ function App() {
                 </div>
                 <span className="counter-badge">{runState.copiedCount}</span>
               </div>
-              <LogList emptyMessage="New and updated files will stream here during a sync." items={runState.transferLog} />
+              <LogList
+                emptyMessage="New and updated files will stream here during a sync."
+                items={runState.transferLog}
+              />
             </section>
 
             <section className="panel log-panel">
@@ -363,7 +564,164 @@ function App() {
                 </div>
                 <span className="counter-badge">{runState.deletedCount}</span>
               </div>
-              <LogList emptyMessage="Deleted files will stream here when the local mirror is cleaned." items={runState.deletionLog} />
+              <LogList
+                emptyMessage="Deleted files will stream here when the local mirror is cleaned."
+                items={runState.deletionLog}
+              />
+            </section>
+          </section>
+        ) : null}
+
+        {!isInitializing && activeView === 'preview' ? (
+          <section className="settings-panel">
+            <section className="panel preview-header">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Sync Preview</p>
+                  <h2>{previewPlan ? 'Planned file actions' : 'No preview generated yet'}</h2>
+                </div>
+                <div className="action-row">
+                  <button
+                    className="ghost-button"
+                    disabled={!canStartSync || isPreviewing}
+                    onClick={handlePreview}
+                    type="button"
+                  >
+                    {isPreviewing ? 'Refreshing...' : 'Refresh preview'}
+                  </button>
+                  <button
+                    className="primary-button"
+                    disabled={!canStartSync}
+                    onClick={handleStartSync}
+                    type="button"
+                  >
+                    Run update
+                  </button>
+                </div>
+              </div>
+
+              {previewPlan ? (
+                <div className="stats-grid">
+                  <StatCard
+                    detail={previewPlan.summary.totalCopyBytesLabel}
+                    label="Files to copy"
+                    value={previewPlan.summary.copyCount.toString()}
+                  />
+                  <StatCard
+                    detail="Files that exist locally but not in the source"
+                    label="Files to delete"
+                    value={previewPlan.summary.deleteCount.toString()}
+                  />
+                  <StatCard
+                    detail={
+                      previewPlan.firmwareRetentionEnabled
+                        ? 'Retained by firmware protection'
+                        : 'Disabled for this run'
+                    }
+                    label="Skipped deletes"
+                    value={previewPlan.summary.skippedDeleteCount.toString()}
+                  />
+                  <StatCard
+                    detail={`${previewPlan.selectedDrive}:\\ source`}
+                    label="Generated"
+                    value={formatTimestamp(previewPlan.generatedAt)}
+                  />
+                </div>
+              ) : (
+                <p className="empty-copy">
+                  Generate a preview before running an update so you can verify copies,
+                  deletions, and retained firmware paths.
+                </p>
+              )}
+            </section>
+
+            {previewPlan ? (
+              <section className="view-grid">
+                <PlanPanel
+                  actions={previewActions.copies}
+                  eyebrow="Incoming"
+                  emptyMessage="No files need copying."
+                  title="Files to copy"
+                />
+                <PlanPanel
+                  actions={previewActions.deletes}
+                  eyebrow="Cleanup"
+                  emptyMessage="No files are queued for deletion."
+                  title="Files to delete"
+                />
+                <PlanPanel
+                  actions={previewActions.skippedDeletes}
+                  eyebrow="Retained"
+                  emptyMessage="No firmware-retained files in this run."
+                  title="Skipped deletes"
+                />
+              </section>
+            ) : null}
+          </section>
+        ) : null}
+
+        {!isInitializing && activeView === 'history' ? (
+          <section className="settings-panel">
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Run History</p>
+                  <h2>Persistent local audit trail</h2>
+                </div>
+                <button className="ghost-button" onClick={() => void refreshHistory()} type="button">
+                  Refresh history
+                </button>
+              </div>
+
+              {isHistoryLoading ? <p className="empty-copy">Loading run history...</p> : null}
+
+              {!isHistoryLoading && historyRecords.length === 0 ? (
+                <p className="empty-copy">
+                  No completed, stopped, or failed runs have been recorded yet.
+                </p>
+              ) : null}
+
+              <div className="history-list">
+                {historyRecords.map((record) => (
+                  <article className="history-card" key={record.id}>
+                    <div className="panel-heading">
+                      <div>
+                        <p className="eyebrow">{record.status.replace('_', ' ')}</p>
+                        <h2>{formatTimestamp(record.finishedAt)}</h2>
+                      </div>
+                      <span className={`status-pill status-pill--${statusTone(record.status)}`}>
+                        <span className="status-dot" />
+                        {record.status}
+                      </span>
+                    </div>
+
+                    <div className="history-meta">
+                      <span>Drive: {record.selectedDrive ? `${record.selectedDrive}:\\` : 'n/a'}</span>
+                      <span>{record.enabledFolders.length} folders enabled</span>
+                      <span>
+                        Firmware retention:{' '}
+                        {record.firmwareRetentionEnabled ? 'enabled' : 'disabled'}
+                      </span>
+                    </div>
+
+                    <div className="history-stats">
+                      <span>Copied: {record.summary.copiedFiles}</span>
+                      <span>Deleted: {record.summary.deletedFiles}</span>
+                      <span>Skipped deletes: {record.summary.skippedDeletes}</span>
+                      <span>{record.summary.copiedBytesLabel || '0 bytes copied'}</span>
+                    </div>
+
+                    {record.errorMessage ? (
+                      <div className="banner banner--error">{record.errorMessage}</div>
+                    ) : null}
+
+                    <LogList
+                      emptyMessage="No recent actions were recorded for this run."
+                      items={record.recentActions}
+                    />
+                  </article>
+                ))}
+              </div>
             </section>
           </section>
         ) : null}
@@ -387,12 +745,8 @@ function App() {
                   onClick={() => handleFolderToggle(folder)}
                   type="button"
                 >
-                  <span>
+                  <span className="folder-copy">
                     <strong>{folder.label}</strong>
-                    <small>
-                      Source: [Drive]\Folders\FBAU-PWS\DATA\For Laptops\CUSP\CUSP-Data\
-                      {folder.label}
-                    </small>
                   </span>
                   <span className={`switch ${draftSettings.folders[folder.key] ? 'is-on' : ''}`}>
                     <span className="switch-thumb" />
@@ -402,10 +756,21 @@ function App() {
             </div>
 
             <div className="action-row action-row--settings">
-              <button className="primary-button" disabled={!hasUnsavedChanges || isSaving} onClick={handleApplySettings} type="button">
-                Apply
+              {appNotice ? <span className="save-indicator">{appNotice}</span> : null}
+              <button
+                className="primary-button"
+                disabled={!hasUnsavedChanges || isSaving}
+                onClick={handleApplySettings}
+                type="button"
+              >
+                {isSaving ? 'Saving...' : 'Apply'}
               </button>
-              <button className="secondary-button" disabled={!hasUnsavedChanges || isSaving} onClick={handleResetSettings} type="button">
+              <button
+                className="secondary-button"
+                disabled={!hasUnsavedChanges || isSaving}
+                onClick={handleResetSettings}
+                type="button"
+              >
                 Cancel
               </button>
             </div>
@@ -443,10 +808,20 @@ function App() {
             </button>
 
             <div className="action-row action-row--settings">
-              <button className="primary-button" disabled={!hasUnsavedChanges || isSaving} onClick={handleApplySettings} type="button">
+              <button
+                className="primary-button"
+                disabled={!hasUnsavedChanges || isSaving}
+                onClick={handleApplySettings}
+                type="button"
+              >
                 Apply
               </button>
-              <button className="secondary-button" disabled={!hasUnsavedChanges || isSaving} onClick={handleResetSettings} type="button">
+              <button
+                className="secondary-button"
+                disabled={!hasUnsavedChanges || isSaving}
+                onClick={handleResetSettings}
+                type="button"
+              >
                 Cancel
               </button>
             </div>
@@ -457,11 +832,18 @@ function App() {
   )
 }
 
-function NavButton({ active, description, label, onClick }: { active: boolean; description: string; label: string; onClick: () => void }) {
+function NavButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}) {
   return (
     <button className={`nav-button ${active ? 'is-active' : ''}`} onClick={onClick} type="button">
       <strong>{label}</strong>
-      <span>{description}</span>
     </button>
   )
 }
@@ -487,6 +869,43 @@ function ProgressBar({ label, value }: { label: string; value: number }) {
         <div className="progress-fill" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
       </div>
     </div>
+  )
+}
+
+function PlanPanel({
+  actions,
+  eyebrow,
+  emptyMessage,
+  title,
+}: {
+  actions: SyncPlanAction[]
+  eyebrow: string
+  emptyMessage: string
+  title: string
+}) {
+  return (
+    <section className="panel plan-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2>{title}</h2>
+        </div>
+        <span className="counter-badge">{actions.length}</span>
+      </div>
+      {actions.length === 0 ? (
+        <p className="empty-copy">{emptyMessage}</p>
+      ) : (
+        <div className="plan-list">
+          {actions.map((action, index) => (
+            <article className="plan-card" key={`${action.destinationPath}-${index}`}>
+              <strong>{action.destinationPath}</strong>
+              {action.sourcePath ? <span>Source: {action.sourcePath}</span> : null}
+              <span>{action.reason}</span>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -558,6 +977,20 @@ function getErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback
+}
+
+function formatTimestamp(value: string) {
+  const timestamp = Number(value)
+
+  if (Number.isNaN(timestamp) || timestamp <= 0) {
+    return value
+  }
+
+  return new Date(timestamp).toLocaleString()
+}
+
+function statusTone(status: RunAuditRecord['status']) {
+  return status === 'completed' ? 'online' : 'offline'
 }
 
 export default App

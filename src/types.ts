@@ -1,4 +1,4 @@
-export type NavView = 'home' | 'folder-selection' | 'firmware-retention'
+export type NavView = 'home' | 'preview' | 'history' | 'folder-selection' | 'firmware-retention'
 
 export interface FolderDefinition {
   key: string
@@ -33,7 +33,56 @@ export interface SyncSummary {
   copiedFiles: number
   deletedFiles: number
   skippedDeletes: number
+  plannedCopyFiles: number
+  plannedDeleteFiles: number
+  plannedSkippedDeletes: number
   copiedBytesLabel: string
+}
+
+export type SyncPlanActionKind = 'copy' | 'delete' | 'skip_delete'
+
+export interface SyncPlanAction {
+  action: SyncPlanActionKind
+  folder: string
+  sourcePath: string | null
+  destinationPath: string
+  reason: string
+  sizeBytes: number | null
+}
+
+export interface SyncPlanSummary {
+  copyCount: number
+  deleteCount: number
+  skippedDeleteCount: number
+  totalCopyBytes: number
+  totalCopyBytesLabel: string
+}
+
+export interface SyncPlan {
+  generatedAt: string
+  selectedDrive: string
+  sourceRoot: string
+  destinationRoot: string
+  firmwareRetentionEnabled: boolean
+  actions: SyncPlanAction[]
+  summary: SyncPlanSummary
+}
+
+export type RunAuditStatus = 'completed' | 'stopped' | 'failed'
+
+export interface RunAuditRecord {
+  id: string
+  startedAt: string
+  finishedAt: string
+  status: RunAuditStatus
+  selectedDrive: string | null
+  sourceRoot: string | null
+  destinationRoot: string
+  enabledFolders: string[]
+  firmwareRetentionEnabled: boolean
+  summary: SyncSummary
+  errorMessage: string | null
+  recentActions: string[]
 }
 
 export interface SyncRunState {

@@ -1,6 +1,9 @@
 use crate::{
-    detection,
-    models::{AppSettings, SyncEvent, SyncSummary, FOLDER_DEFINITIONS},
+    config, detection,
+    models::{
+        AppSettings, RunAuditRecord, RunAuditStatus, SyncEvent, SyncPlan, SyncPlanAction,
+        SyncPlanActionKind, SyncPlanSummary, SyncSummary, FOLDER_DEFINITIONS,
+    },
 };
 use std::{
     collections::HashSet,
@@ -12,19 +15,35 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::SystemTime,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use walkdir::WalkDir;
 
 const SYNC_EVENT_NAME: &str = "sync://event";
+const RECENT_ACTION_LIMIT: usize = 100;
 
 #[derive(Default)]
 pub struct SyncCoordinator {
     is_running: Arc<AtomicBool>,
     stop_requested: Arc<AtomicBool>,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+pub fn preview_sync(settings: AppSettings) -> Result<SyncPlan, SyncError> {
+    let normalized = settings.normalized();
+    let selected_drive = normalized
+        .selected_drive
+        .clone()
+        .ok_or(SyncError::MissingDrive)?;
+    let source_root = detection::build_source_root(&selected_drive);
+    build_sync_plan_with_roots(
+        &normalized,
+        &selected_drive,
+        &source_root,
+        Path::new(r"C:\"),
+    )
 }
 
 impl SyncCoordinator {
@@ -40,15 +59,60 @@ impl SyncCoordinator {
 
         *worker_slot = Some(thread::spawn(move || {
             let normalized = settings.normalized();
+            let started_at = timestamp_now_ms();
+            let selected_drive = normalized.selected_drive.clone();
+            let source_root = selected_drive
+                .as_ref()
+                .map(|drive| detection::build_source_root(drive));
+
             let result = run_sync(&app, &normalized, &stop_requested);
 
-            if let Err(error) = result {
-                let _ = emit(
-                    &app,
-                    SyncEvent::RunFailed {
-                        message: error.to_string(),
-                    },
-                );
+            match result {
+                Ok(run_result) => {
+                    let _ = config::append_run_history(
+                        &app,
+                        RunAuditRecord {
+                            id: started_at.clone(),
+                            started_at,
+                            finished_at: timestamp_now_ms(),
+                            status: run_result.status,
+                            selected_drive,
+                            source_root: source_root.map(|path| path.display().to_string()),
+                            destination_root: r"C:\".to_string(),
+                            enabled_folders: enabled_folders(&normalized),
+                            firmware_retention_enabled: normalized.firmware_retention_enabled,
+                            summary: run_result.summary,
+                            error_message: None,
+                            recent_actions: run_result.recent_actions,
+                        },
+                    );
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    let _ = emit(
+                        &app,
+                        SyncEvent::RunFailed {
+                            message: message.clone(),
+                        },
+                    );
+                    let _ = config::append_run_history(
+                        &app,
+                        RunAuditRecord {
+                            id: started_at.clone(),
+                            started_at,
+                            finished_at: timestamp_now_ms(),
+                            status: RunAuditStatus::Failed,
+                            selected_drive,
+                            source_root: source_root.map(|path| path.display().to_string()),
+                            destination_root: r"C:\".to_string(),
+                            enabled_folders: enabled_folders(&normalized),
+                            firmware_retention_enabled: normalized.firmware_retention_enabled,
+                            summary: SyncSummary::default(),
+                            error_message: Some(message),
+                            recent_actions: Vec::new(),
+                        },
+                    );
+                }
             }
 
             is_running.store(false, Ordering::SeqCst);
@@ -85,11 +149,17 @@ pub enum SyncError {
     InvalidRelativePath,
 }
 
+struct RunResult {
+    status: RunAuditStatus,
+    summary: SyncSummary,
+    recent_actions: Vec<String>,
+}
+
 fn run_sync(
     app: &AppHandle,
     settings: &AppSettings,
     stop_requested: &AtomicBool,
-) -> Result<(), SyncError> {
+) -> Result<RunResult, SyncError> {
     emit(
         app,
         SyncEvent::RunStarted {
@@ -98,165 +168,149 @@ fn run_sync(
     )
     .map_err(|error| SyncError::Io(std::io::Error::other(error.to_string())))?;
 
-    let selected_drive = settings
-        .selected_drive
-        .clone()
-        .ok_or(SyncError::MissingDrive)?;
-    let source_root = detection::build_source_root(&selected_drive);
-
-    if !source_root.exists() {
-        return Err(SyncError::MissingSourceRoot(source_root.display().to_string()));
-    }
-
-    let enabled_folders: Vec<&str> = FOLDER_DEFINITIONS
+    let plan = preview_sync(settings.clone())?;
+    let work_actions = plan
+        .actions
         .iter()
-        .filter_map(|(key, _)| {
-            settings
-                .folders
-                .get(*key)
-                .copied()
-                .filter(|enabled| *enabled)
-                .map(|_| *key)
+        .filter(|action| {
+            matches!(
+                action.action,
+                SyncPlanActionKind::Copy | SyncPlanActionKind::Delete
+            )
         })
-        .collect();
+        .cloned()
+        .collect::<Vec<_>>();
 
-    let total_work_units = enabled_folders.len().max(1);
-    let mut summary = SyncSummary::default();
+    let mut summary = SyncSummary {
+        skipped_deletes: plan.summary.skipped_delete_count,
+        planned_copy_files: plan.summary.copy_count,
+        planned_delete_files: plan.summary.delete_count,
+        planned_skipped_deletes: plan.summary.skipped_delete_count,
+        ..SyncSummary::default()
+    };
     let mut copied_bytes = 0_u64;
+    let mut recent_actions = Vec::new();
+    let total_work_units = work_actions.len().max(1);
 
-    for (folder_index, folder_name) in enabled_folders.iter().enumerate() {
+    for (action_index, action) in work_actions.iter().enumerate() {
         if stop_requested.load(Ordering::SeqCst) {
             summary.copied_bytes_label = format_bytes(copied_bytes);
             emit(
                 app,
                 SyncEvent::RunStopped {
-                    summary,
+                    summary: summary.clone(),
                     message: "Sync stopped after the current operation.".to_string(),
                 },
             )
             .ok();
-            return Ok(());
+            return Ok(RunResult {
+                status: RunAuditStatus::Stopped,
+                summary,
+                recent_actions,
+            });
         }
 
-        let source_folder = source_root.join(folder_name);
-        let destination_folder = PathBuf::from(r"C:\").join(folder_name);
+        match action.action {
+            SyncPlanActionKind::Copy => {
+                let source_path = PathBuf::from(
+                    action
+                        .source_path
+                        .as_ref()
+                        .ok_or(SyncError::InvalidRelativePath)?,
+                );
+                let destination_path = PathBuf::from(&action.destination_path);
 
-        if !source_folder.exists() {
-          continue;
-        }
+                emit(
+                    app,
+                    SyncEvent::ItemProgress {
+                        display_name: source_path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("file")
+                            .to_string(),
+                        source_path: source_path.display().to_string(),
+                        item_progress: 0.0,
+                        overall_progress: (action_index as f64 / total_work_units as f64) * 100.0,
+                        message: format!("Checking {}", source_path.display()),
+                    },
+                )
+                .ok();
 
-        fs::create_dir_all(&destination_folder)?;
-        let source_files = collect_files(&source_folder);
-        let file_total = source_files.len().max(1);
-        let mut seen_relative_files = HashSet::new();
-
-        for (file_index, source_file) in source_files.iter().enumerate() {
-            let relative_path = source_file
-                .strip_prefix(&source_folder)
-                .map_err(|_| SyncError::InvalidRelativePath)?;
-            let destination_file = destination_folder.join(relative_path);
-            let display_name = source_file
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("file")
-                .to_string();
-
-            seen_relative_files.insert(relative_path.to_path_buf());
-            let overall_progress = ((folder_index as f64)
-                + ((file_index as f64) / (file_total as f64)))
-                / (total_work_units as f64)
-                * 100.0;
-
-            emit(
-                app,
-                SyncEvent::ItemProgress {
-                    display_name,
-                    source_path: source_file.display().to_string(),
-                    item_progress: 0.0,
-                    overall_progress,
-                    message: format!("Checking {}", source_file.display()),
-                },
-            )
-            .ok();
-
-            if should_copy(source_file, &destination_file)? {
-                if let Some(parent) = destination_file.parent() {
+                if let Some(parent) = destination_path.parent() {
                     fs::create_dir_all(parent)?;
                 }
 
                 copied_bytes += copy_file_with_progress(
                     app,
-                    source_file,
-                    &destination_file,
-                    file_total,
-                    file_index,
-                    folder_index,
+                    &source_path,
+                    &destination_path,
                     total_work_units,
+                    action_index,
                 )?;
                 summary.copied_files += 1;
+                push_recent_action(
+                    &mut recent_actions,
+                    format!("Copied {}", destination_path.display()),
+                );
 
                 emit(
                     app,
                     SyncEvent::FileCopied {
-                        destination_path: destination_file.display().to_string(),
+                        destination_path: destination_path.display().to_string(),
                         total_copied: summary.copied_files,
-                        message: format!("Copied {}", destination_file.display()),
+                        message: format!("Copied {}", destination_path.display()),
                     },
                 )
                 .ok();
             }
+            SyncPlanActionKind::Delete => {
+                let destination_path = PathBuf::from(&action.destination_path);
 
-            if stop_requested.load(Ordering::SeqCst) {
-                summary.copied_bytes_label = format_bytes(copied_bytes);
+                if destination_path.exists() {
+                    fs::remove_file(&destination_path)?;
+                    summary.deleted_files += 1;
+                    push_recent_action(
+                        &mut recent_actions,
+                        format!("Removed {}", destination_path.display()),
+                    );
+                }
+
                 emit(
                     app,
-                    SyncEvent::RunStopped {
-                        summary,
-                        message: "Sync stopped after the current operation.".to_string(),
+                    SyncEvent::ItemProgress {
+                        display_name: destination_path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("file")
+                            .to_string(),
+                        source_path: action
+                            .source_path
+                            .clone()
+                            .unwrap_or_else(|| destination_path.display().to_string()),
+                        item_progress: 100.0,
+                        overall_progress: ((action_index + 1) as f64 / total_work_units as f64)
+                            * 100.0,
+                        message: format!("Removing {}", destination_path.display()),
                     },
                 )
                 .ok();
-                return Ok(());
-            }
-        }
 
-        let (stale_entries, skipped_deletes) = collect_stale_entries(
-            &destination_folder,
-            &seen_relative_files,
-            settings.firmware_retention_enabled,
-        )?;
-        summary.skipped_deletes += skipped_deletes;
-
-        for stale_entry in stale_entries {
-            if stop_requested.load(Ordering::SeqCst) {
-                summary.copied_bytes_label = format_bytes(copied_bytes);
-                emit(
-                    app,
-                    SyncEvent::RunStopped {
-                        summary,
-                        message: "Sync stopped after the current operation.".to_string(),
-                    },
-                )
-                .ok();
-                return Ok(());
-            }
-
-            if stale_entry.is_dir() {
-                fs::remove_dir_all(&stale_entry)?;
-            } else {
-                fs::remove_file(&stale_entry)?;
-                summary.deleted_files += 1;
                 emit(
                     app,
                     SyncEvent::FileDeleted {
-                        destination_path: stale_entry.display().to_string(),
+                        destination_path: destination_path.display().to_string(),
                         total_deleted: summary.deleted_files,
-                        message: format!("Removed {}", stale_entry.display()),
+                        message: format!("Removed {}", destination_path.display()),
                     },
                 )
                 .ok();
             }
+            SyncPlanActionKind::SkipDelete => {}
         }
+    }
+
+    for folder in enabled_folders(settings) {
+        cleanup_empty_dirs(&PathBuf::from(r"C:\").join(folder))?;
     }
 
     summary.copied_bytes_label = format_bytes(copied_bytes);
@@ -264,13 +318,122 @@ fn run_sync(
     emit(
         app,
         SyncEvent::RunCompleted {
-            summary,
+            summary: summary.clone(),
             message: "Sync completed successfully.".to_string(),
         },
     )
     .ok();
 
-    Ok(())
+    Ok(RunResult {
+        status: RunAuditStatus::Completed,
+        summary,
+        recent_actions,
+    })
+}
+
+fn build_sync_plan_with_roots(
+    settings: &AppSettings,
+    selected_drive: &str,
+    source_root: &Path,
+    destination_root: &Path,
+) -> Result<SyncPlan, SyncError> {
+    if !source_root.exists() {
+        return Err(SyncError::MissingSourceRoot(
+            source_root.display().to_string(),
+        ));
+    }
+
+    let mut actions = Vec::new();
+    let mut summary = SyncPlanSummary::default();
+
+    for folder_name in enabled_folders(settings) {
+        let source_folder = source_root.join(&folder_name);
+        let destination_folder = destination_root.join(&folder_name);
+
+        if !source_folder.exists() {
+            continue;
+        }
+
+        let source_files = collect_files(&source_folder);
+        let mut seen_relative_files = HashSet::new();
+
+        for source_file in source_files {
+            let relative_path = source_file
+                .strip_prefix(&source_folder)
+                .map_err(|_| SyncError::InvalidRelativePath)?;
+            let destination_file = destination_folder.join(relative_path);
+
+            seen_relative_files.insert(relative_path.to_path_buf());
+
+            if should_copy(&source_file, &destination_file)? {
+                let size_bytes = fs::metadata(&source_file)?.len();
+                summary.copy_count += 1;
+                summary.total_copy_bytes += size_bytes;
+                actions.push(SyncPlanAction {
+                    action: SyncPlanActionKind::Copy,
+                    folder: folder_name.clone(),
+                    source_path: Some(source_file.display().to_string()),
+                    destination_path: destination_file.display().to_string(),
+                    reason: if destination_file.exists() {
+                        "source file is newer or changed".to_string()
+                    } else {
+                        "file does not exist locally".to_string()
+                    },
+                    size_bytes: Some(size_bytes),
+                });
+            }
+        }
+
+        for stale_file in collect_stale_files(&destination_folder, &seen_relative_files)? {
+            if settings.firmware_retention_enabled && is_firmware_path(&stale_file) {
+                summary.skipped_delete_count += 1;
+                actions.push(SyncPlanAction {
+                    action: SyncPlanActionKind::SkipDelete,
+                    folder: folder_name.clone(),
+                    source_path: None,
+                    destination_path: stale_file.display().to_string(),
+                    reason: "firmware retention is enabled".to_string(),
+                    size_bytes: None,
+                });
+            } else {
+                summary.delete_count += 1;
+                actions.push(SyncPlanAction {
+                    action: SyncPlanActionKind::Delete,
+                    folder: folder_name.clone(),
+                    source_path: None,
+                    destination_path: stale_file.display().to_string(),
+                    reason: "file no longer exists in ShareFile source".to_string(),
+                    size_bytes: None,
+                });
+            }
+        }
+    }
+
+    summary.total_copy_bytes_label = format_bytes(summary.total_copy_bytes);
+
+    Ok(SyncPlan {
+        generated_at: timestamp_now_ms(),
+        selected_drive: selected_drive.to_string(),
+        source_root: source_root.display().to_string(),
+        destination_root: destination_root.display().to_string(),
+        firmware_retention_enabled: settings.firmware_retention_enabled,
+        actions,
+        summary,
+    })
+}
+
+fn enabled_folders(settings: &AppSettings) -> Vec<String> {
+    FOLDER_DEFINITIONS
+        .iter()
+        .filter_map(|(key, _)| {
+            settings
+                .folders
+                .get(*key)
+                .copied()
+                .filter(|enabled| *enabled)
+                .map(|_| (*key).to_string())
+        })
+        .collect()
 }
 
 fn collect_files(root: &Path) -> Vec<PathBuf> {
@@ -285,46 +448,53 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn collect_stale_entries(
+fn collect_stale_files(
     destination_root: &Path,
     expected_files: &HashSet<PathBuf>,
-    firmware_retention_enabled: bool,
-) -> Result<(Vec<PathBuf>, usize), SyncError> {
-    let mut stale_entries = Vec::new();
-    let mut skipped_deletes = 0;
+) -> Result<Vec<PathBuf>, SyncError> {
+    if !destination_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut stale_files = Vec::new();
 
     for entry in WalkDir::new(destination_root)
-        .contents_first(true)
         .into_iter()
         .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
     {
-        let path = entry.path();
-        if path == destination_root {
-            continue;
-        }
-
-        if firmware_retention_enabled && is_firmware_path(path) {
-            if entry.file_type().is_file() {
-                skipped_deletes += 1;
-            }
-            continue;
-        }
-
-        let relative_path = path
+        let relative_path = entry
+            .path()
             .strip_prefix(destination_root)
             .map_err(|_| SyncError::InvalidRelativePath)?
             .to_path_buf();
 
-        if entry.file_type().is_file() && !expected_files.contains(&relative_path) {
-            stale_entries.push(path.to_path_buf());
-        }
-
-        if entry.file_type().is_dir() && fs::read_dir(path)?.next().is_none() {
-            stale_entries.push(path.to_path_buf());
+        if !expected_files.contains(&relative_path) {
+            stale_files.push(entry.path().to_path_buf());
         }
     }
 
-    Ok((stale_entries, skipped_deletes))
+    stale_files.sort();
+    Ok(stale_files)
+}
+
+fn cleanup_empty_dirs(root: &Path) -> Result<(), SyncError> {
+    if !root.exists() {
+        return Ok(());
+    }
+
+    for entry in WalkDir::new(root)
+        .contents_first(true)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_dir())
+    {
+        if entry.path() != root && fs::read_dir(entry.path())?.next().is_none() {
+            fs::remove_dir(entry.path())?;
+        }
+    }
+
+    Ok(())
 }
 
 fn should_copy(source_path: &Path, destination_path: &Path) -> Result<bool, SyncError> {
@@ -351,10 +521,8 @@ fn copy_file_with_progress(
     app: &AppHandle,
     source_path: &Path,
     destination_path: &Path,
-    file_total: usize,
-    file_index: usize,
-    folder_index: usize,
     total_work_units: usize,
+    action_index: usize,
 ) -> Result<u64, SyncError> {
     let mut source = fs::File::open(source_path)?;
     let mut destination = fs::File::create(destination_path)?;
@@ -376,12 +544,8 @@ fn copy_file_with_progress(
         } else {
             (transferred_bytes as f64 / total_bytes as f64) * 100.0
         };
-
-        let base_progress = ((folder_index as f64)
-            + ((file_index as f64) / (file_total.max(1) as f64)))
-            / (total_work_units as f64);
         let overall_progress =
-            (base_progress + (item_progress / 100.0) / total_work_units as f64) * 100.0;
+            ((action_index as f64) + (item_progress / 100.0)) / total_work_units as f64 * 100.0;
 
         emit(
             app,
@@ -418,6 +582,20 @@ fn emit(app: &AppHandle, event: SyncEvent) -> tauri::Result<()> {
     app.emit(SYNC_EVENT_NAME, event)
 }
 
+fn push_recent_action(actions: &mut Vec<String>, action: String) {
+    actions.push(action);
+    if actions.len() > RECENT_ACTION_LIMIT {
+        actions.remove(0);
+    }
+}
+
+fn timestamp_now_ms() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().to_string())
+        .unwrap_or_else(|_| "0".to_string())
+}
+
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
@@ -432,5 +610,91 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.2} KB copied", bytes_f / KB)
     } else {
         format!("{bytes} bytes copied")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "teamupdater-v3-{name}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn build_sync_plan_detects_copy_delete_and_skip_delete() {
+        let source_root = unique_temp_dir("source");
+        let destination_root = unique_temp_dir("destination");
+
+        let source_folder = source_root.join("CUSPAPPS");
+        let destination_folder = destination_root.join("CUSPAPPS");
+        fs::create_dir_all(source_folder.join("sub")).expect("source folder");
+        fs::create_dir_all(destination_folder.join("Firmware")).expect("destination folder");
+
+        fs::write(source_folder.join("sub").join("app.txt"), "new file").expect("source file");
+        fs::write(destination_folder.join("orphan.txt"), "stale").expect("stale file");
+        fs::write(
+            destination_folder.join("Firmware").join("keep.bin"),
+            "firmware",
+        )
+        .expect("firmware file");
+
+        let settings = AppSettings::default();
+        let plan = build_sync_plan_with_roots(&settings, "Z", &source_root, &destination_root)
+            .expect("build plan");
+
+        assert_eq!(plan.summary.copy_count, 1);
+        assert_eq!(plan.summary.delete_count, 2);
+
+        let retained_settings = AppSettings {
+            firmware_retention_enabled: true,
+            ..AppSettings::default()
+        };
+        let retained_plan =
+            build_sync_plan_with_roots(&retained_settings, "Z", &source_root, &destination_root)
+                .expect("build retained plan");
+
+        assert_eq!(retained_plan.summary.copy_count, 1);
+        assert_eq!(retained_plan.summary.delete_count, 1);
+        assert_eq!(retained_plan.summary.skipped_delete_count, 1);
+        assert!(retained_plan.actions.iter().any(|action| {
+            matches!(action.action, SyncPlanActionKind::SkipDelete)
+                && action.destination_path.ends_with(r"Firmware\keep.bin")
+        }));
+
+        let _ = fs::remove_dir_all(source_root);
+        let _ = fs::remove_dir_all(destination_root);
+    }
+
+    #[test]
+    fn should_copy_when_source_is_newer_or_size_changes() {
+        let root = unique_temp_dir("copy-check");
+        let source = root.join("source.txt");
+        let destination = root.join("destination.txt");
+
+        fs::write(&source, "abc").expect("source");
+        assert!(should_copy(&source, &destination).expect("missing destination"));
+
+        fs::write(&destination, "abcd").expect("destination");
+        assert!(should_copy(&source, &destination).expect("size mismatch"));
+
+        fs::write(&destination, "abc").expect("destination same size");
+        assert!(!should_copy(&source, &destination).expect("same file"));
+
+        std::thread::sleep(Duration::from_millis(10));
+        fs::write(&source, "abc").expect("source updated");
+        assert!(should_copy(&source, &destination).expect("source newer"));
+
+        let _ = fs::remove_dir_all(root);
     }
 }

@@ -1,14 +1,7 @@
 use crate::models::{DetectDrivesResponse, DriveCandidate, CUSP_DATA_RELATIVE_PATH};
 use std::{fs, path::PathBuf};
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum DetectionError {
-    #[error("failed to read system drive letters")]
-    ReadDrives,
-}
-
-pub fn detect_sharefile_drives() -> Result<DetectDrivesResponse, DetectionError> {
+pub fn detect_sharefile_drives() -> DetectDrivesResponse {
     let mut candidates = Vec::new();
 
     for letter in b'A'..=b'Z' {
@@ -38,10 +31,10 @@ pub fn detect_sharefile_drives() -> Result<DetectDrivesResponse, DetectionError>
         None
     };
 
-    Ok(DetectDrivesResponse {
+    DetectDrivesResponse {
         candidates,
         auto_selected,
-    })
+    }
 }
 
 pub fn build_source_root(drive_letter: &str) -> PathBuf {

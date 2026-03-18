@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AppSettings, DetectDrivesResponse } from '../types'
+import type { AppSettings, DetectDrivesResponse, RunAuditRecord, SyncPlan } from '../types'
 import { buildDefaultSettings, mergeSettings } from './settings'
 
 export const isDesktopRuntime =
@@ -44,6 +44,22 @@ export async function saveSettings(settings: AppSettings) {
   window.localStorage.setItem(browserStorageKey, JSON.stringify(settings))
 }
 
+export async function previewSyncPlan(settings: AppSettings): Promise<SyncPlan> {
+  if (!isDesktopRuntime) {
+    throw new Error('Preview is only available in the Tauri desktop runtime.')
+  }
+
+  return invoke<SyncPlan>('preview_sync_plan', { settings })
+}
+
+export async function loadRunHistory(): Promise<RunAuditRecord[]> {
+  if (!isDesktopRuntime) {
+    return []
+  }
+
+  return invoke<RunAuditRecord[]>('load_run_history')
+}
+
 export async function startSync(settings: AppSettings) {
   if (!isDesktopRuntime) {
     throw new Error('The sync engine is only available in the Tauri desktop runtime.')
@@ -58,4 +74,12 @@ export async function requestSyncStop() {
   }
 
   return invoke<void>('request_sync_stop')
+}
+
+export async function quitApp() {
+  if (!isDesktopRuntime) {
+    return
+  }
+
+  return invoke<void>('quit_app')
 }

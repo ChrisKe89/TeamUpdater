@@ -1,8 +1,6 @@
 import type { AppSettings, FolderDefinition } from '../types'
 
 const folderDefinitions: FolderDefinition[] = [
-  { key: '_gsdata_', label: '_gsdata_', isMandatory: false },
-  { key: 'CUSP Tool Installer', label: 'CUSP Tool Installer', isMandatory: false },
   { key: 'CUSPAPPS', label: 'CUSPAPPS', isMandatory: true },
   { key: 'TeamCF', label: 'TeamCF', isMandatory: false },
   { key: 'TeamDT-A3', label: 'TeamDT-A3', isMandatory: false },
@@ -16,7 +14,6 @@ const folderDefinitions: FolderDefinition[] = [
   { key: 'TeamPrinters', label: 'TeamPrinters', isMandatory: false },
   { key: 'TeamProduction', label: 'TeamProduction', isMandatory: false },
   { key: 'TeamWF', label: 'TeamWF', isMandatory: false },
-  { key: 'Temp', label: 'Temp', isMandatory: false },
 ]
 
 export function getFolderDefinitions() {
@@ -28,7 +25,7 @@ export function buildDefaultSettings(autoSelectedDrive: string | null = null): A
     selectedDrive: autoSelectedDrive,
     firmwareRetentionEnabled: false,
     folders: folderDefinitions.reduce<Record<string, boolean>>((accumulator, folder) => {
-      accumulator[folder.key] = folder.isMandatory || folder.key !== '_gsdata_'
+      accumulator[folder.key] = folder.isMandatory
       return accumulator
     }, {}),
   }
