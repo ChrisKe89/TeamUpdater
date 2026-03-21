@@ -1,8 +1,8 @@
 use crate::{
     config, detection,
     models::{
-        AppSettings, RunAuditRecord, RunAuditStatus, SyncEvent, SyncPlan, SyncPlanAction,
-        SyncPlanActionKind, SyncPlanSummary, SyncSummary, FOLDER_DEFINITIONS,
+        AppSettings, RunAuditRecord, RunAuditStatus, SyncEvent, SyncEventScope, SyncPlan,
+        SyncPlanAction, SyncPlanActionKind, SyncPlanSummary, SyncSummary, FOLDER_DEFINITIONS,
     },
 };
 use std::{
@@ -32,32 +32,80 @@ pub struct SyncCoordinator {
 }
 
 pub fn preview_sync(settings: AppSettings) -> Result<SyncPlan, SyncError> {
-    let normalized = settings.normalized();
-    let selected_drive = normalized
-        .selected_drive
-        .clone()
-        .ok_or(SyncError::MissingDrive)?;
-    let source_root = detection::build_source_root(&selected_drive);
-    build_sync_plan_with_roots(
-        &normalized,
-        &selected_drive,
-        &source_root,
-        Path::new(r"C:\"),
-    )
+    build_plan_for_job(&settings, &AtomicBool::new(false), None)
 }
 
 impl SyncCoordinator {
+    pub fn start_preview(&self, app: AppHandle, settings: AppSettings) -> Result<(), SyncError> {
+        self.start_worker(move |stop_requested| {
+            let normalized = settings.normalized();
+
+            emit(
+                &app,
+                SyncEvent::PreviewStarted {
+                    message: "Preview scan started.".to_string(),
+                },
+            )
+            .ok();
+            emit_log(&app, SyncEventScope::Preview, "Preview scan started.".to_string());
+
+            match build_plan_for_job(
+                &normalized,
+                stop_requested,
+                Some((&app, SyncEventScope::Preview)),
+            ) {
+                Ok(plan) => {
+                    emit_log(
+                        &app,
+                        SyncEventScope::Preview,
+                        format!(
+                            "Preview ready: {} copies, {} deletes, {} retained.",
+                            plan.summary.copy_count,
+                            plan.summary.delete_count,
+                            plan.summary.skipped_delete_count
+                        ),
+                    );
+                    emit(
+                        &app,
+                        SyncEvent::PreviewCompleted {
+                            plan,
+                            message: "Preview scan completed.".to_string(),
+                        },
+                    )
+                    .ok();
+                }
+                Err(SyncError::StopRequested) => {
+                    emit_log(
+                        &app,
+                        SyncEventScope::Preview,
+                        "Preview scan cancelled by operator.".to_string(),
+                    );
+                    emit(
+                        &app,
+                        SyncEvent::PreviewStopped {
+                            message: "Preview scan cancelled.".to_string(),
+                        },
+                    )
+                    .ok();
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    emit_log(&app, SyncEventScope::Preview, format!("Preview failed: {message}"));
+                    let _ = emit(
+                        &app,
+                        SyncEvent::PreviewFailed {
+                            message,
+                        },
+                    );
+                }
+            }
+
+            Ok(())
+        })
+    }
+
     pub fn start(&self, app: AppHandle, settings: AppSettings) -> Result<(), SyncError> {
-        if self.is_running.swap(true, Ordering::SeqCst) {
-            return Err(SyncError::AlreadyRunning);
-        }
-
-        self.stop_requested.store(false, Ordering::SeqCst);
-        let stop_requested = Arc::clone(&self.stop_requested);
-        let is_running = Arc::clone(&self.is_running);
-        let mut worker_slot = self.worker.lock().map_err(|_| SyncError::StatePoisoned)?;
-
-        *worker_slot = Some(thread::spawn(move || {
+        self.start_worker(move |stop_requested| {
             let normalized = settings.normalized();
             let started_at = timestamp_now_ms();
             let selected_drive = normalized.selected_drive.clone();
@@ -65,7 +113,7 @@ impl SyncCoordinator {
                 .as_ref()
                 .map(|drive| detection::build_source_root(drive));
 
-            let result = run_sync(&app, &normalized, &stop_requested);
+            let result = run_sync(&app, &normalized, stop_requested);
 
             match result {
                 Ok(run_result) => {
@@ -89,6 +137,7 @@ impl SyncCoordinator {
                 }
                 Err(error) => {
                     let message = error.to_string();
+                    emit_log(&app, SyncEventScope::Sync, format!("Sync failed: {message}"));
                     let _ = emit(
                         &app,
                         SyncEvent::RunFailed {
@@ -115,10 +164,8 @@ impl SyncCoordinator {
                 }
             }
 
-            is_running.store(false, Ordering::SeqCst);
-        }));
-
-        Ok(())
+            Ok(())
+        })
     }
 
     pub fn request_stop(&self) -> Result<(), SyncError> {
@@ -127,6 +174,35 @@ impl SyncCoordinator {
         }
 
         self.stop_requested.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn start_worker<F>(&self, job: F) -> Result<(), SyncError>
+    where
+        F: FnOnce(&AtomicBool) -> Result<(), SyncError> + Send + 'static,
+    {
+        if self.is_running.swap(true, Ordering::SeqCst) {
+            return Err(SyncError::AlreadyRunning);
+        }
+
+        self.stop_requested.store(false, Ordering::SeqCst);
+        let stop_requested = Arc::clone(&self.stop_requested);
+        let is_running = Arc::clone(&self.is_running);
+        let mut worker_slot = self.worker.lock().map_err(|_| SyncError::StatePoisoned)?;
+
+        if let Some(handle) = worker_slot.take() {
+            if handle.is_finished() {
+                let _ = handle.join();
+            } else {
+                *worker_slot = Some(handle);
+            }
+        }
+
+        *worker_slot = Some(thread::spawn(move || {
+            let _ = job(&stop_requested);
+            is_running.store(false, Ordering::SeqCst);
+        }));
+
         Ok(())
     }
 }
@@ -147,6 +223,8 @@ pub enum SyncError {
     Walk(#[from] walkdir::Error),
     #[error("source path is outside the expected root")]
     InvalidRelativePath,
+    #[error("operation cancelled")]
+    StopRequested,
 }
 
 struct RunResult {
@@ -167,8 +245,39 @@ fn run_sync(
         },
     )
     .map_err(|error| SyncError::Io(std::io::Error::other(error.to_string())))?;
+    emit_log(app, SyncEventScope::Sync, "Sync started.".to_string());
+    emit_log(
+        app,
+        SyncEventScope::Sync,
+        "Building sync plan before file operations.".to_string(),
+    );
 
-    let plan = preview_sync(settings.clone())?;
+    let plan = match build_plan_for_job(settings, stop_requested, Some((app, SyncEventScope::Sync)))
+    {
+        Ok(plan) => plan,
+        Err(SyncError::StopRequested) => {
+            let summary = SyncSummary::default();
+            emit_log(
+                app,
+                SyncEventScope::Sync,
+                "Sync cancelled before file operations started.".to_string(),
+            );
+            emit(
+                app,
+                SyncEvent::RunStopped {
+                    summary: summary.clone(),
+                    message: "Sync cancelled.".to_string(),
+                },
+            )
+            .ok();
+            return Ok(RunResult {
+                status: RunAuditStatus::Stopped,
+                summary,
+                recent_actions: Vec::new(),
+            });
+        }
+        Err(error) => return Err(error),
+    };
     let work_actions = plan
         .actions
         .iter()
@@ -192,9 +301,23 @@ fn run_sync(
     let mut recent_actions = Vec::new();
     let total_work_units = work_actions.len().max(1);
 
+    emit_log(
+        app,
+        SyncEventScope::Sync,
+        format!(
+            "Plan ready: {} copies, {} deletes, {} retained.",
+            plan.summary.copy_count, plan.summary.delete_count, plan.summary.skipped_delete_count
+        ),
+    );
+
     for (action_index, action) in work_actions.iter().enumerate() {
         if stop_requested.load(Ordering::SeqCst) {
             summary.copied_bytes_label = format_bytes(copied_bytes);
+            emit_log(
+                app,
+                SyncEventScope::Sync,
+                "Stop requested. Finishing the current operation before exiting.".to_string(),
+            );
             emit(
                 app,
                 SyncEvent::RunStopped {
@@ -240,6 +363,11 @@ fn run_sync(
                     fs::create_dir_all(parent)?;
                 }
 
+                emit_log(
+                    app,
+                    SyncEventScope::Sync,
+                    format!("Copying {} -> {}", source_path.display(), destination_path.display()),
+                );
                 copied_bytes += copy_file_with_progress(
                     app,
                     &source_path,
@@ -267,6 +395,11 @@ fn run_sync(
                 let destination_path = PathBuf::from(&action.destination_path);
 
                 if destination_path.exists() {
+                    emit_log(
+                        app,
+                        SyncEventScope::Sync,
+                        format!("Removing {}", destination_path.display()),
+                    );
                     fs::remove_file(&destination_path)?;
                     summary.deleted_files += 1;
                     push_recent_action(
@@ -310,10 +443,19 @@ fn run_sync(
     }
 
     for folder in enabled_folders(settings) {
+        ensure_not_stopped(stop_requested)?;
         cleanup_empty_dirs(&PathBuf::from(r"C:\").join(folder))?;
     }
 
     summary.copied_bytes_label = format_bytes(copied_bytes);
+    emit_log(
+        app,
+        SyncEventScope::Sync,
+        format!(
+            "Sync complete: {} copied, {} deleted, {} retained.",
+            summary.copied_files, summary.deleted_files, summary.skipped_deletes
+        ),
+    );
 
     emit(
         app,
@@ -331,11 +473,35 @@ fn run_sync(
     })
 }
 
+fn build_plan_for_job(
+    settings: &AppSettings,
+    stop_requested: &AtomicBool,
+    event_target: Option<(&AppHandle, SyncEventScope)>,
+) -> Result<SyncPlan, SyncError> {
+    let normalized = settings.clone().normalized();
+    let selected_drive = normalized
+        .selected_drive
+        .clone()
+        .ok_or(SyncError::MissingDrive)?;
+    let source_root = detection::build_source_root(&selected_drive);
+
+    build_sync_plan_with_roots(
+        &normalized,
+        &selected_drive,
+        &source_root,
+        Path::new(r"C:\"),
+        stop_requested,
+        event_target,
+    )
+}
+
 fn build_sync_plan_with_roots(
     settings: &AppSettings,
     selected_drive: &str,
     source_root: &Path,
     destination_root: &Path,
+    stop_requested: &AtomicBool,
+    event_target: Option<(&AppHandle, SyncEventScope)>,
 ) -> Result<SyncPlan, SyncError> {
     if !source_root.exists() {
         return Err(SyncError::MissingSourceRoot(
@@ -347,10 +513,16 @@ fn build_sync_plan_with_roots(
     let mut summary = SyncPlanSummary::default();
 
     for folder_name in enabled_folders(settings) {
+        ensure_not_stopped(stop_requested)?;
+        emit_scoped_log(event_target, format!("Scanning folder {folder_name}"));
         let source_folder = source_root.join(&folder_name);
         let destination_folder = destination_root.join(&folder_name);
 
         if !source_folder.exists() {
+            emit_scoped_log(
+                event_target,
+                format!("Skipping {folder_name}: source folder not found."),
+            );
             continue;
         }
 
@@ -358,6 +530,7 @@ fn build_sync_plan_with_roots(
         let mut seen_relative_files = HashSet::new();
 
         for source_file in source_files {
+            ensure_not_stopped(stop_requested)?;
             let relative_path = source_file
                 .strip_prefix(&source_folder)
                 .map_err(|_| SyncError::InvalidRelativePath)?;
@@ -369,6 +542,7 @@ fn build_sync_plan_with_roots(
                 let size_bytes = fs::metadata(&source_file)?.len();
                 summary.copy_count += 1;
                 summary.total_copy_bytes += size_bytes;
+                emit_scoped_log(event_target, format!("Queue copy {}", destination_file.display()));
                 actions.push(SyncPlanAction {
                     action: SyncPlanActionKind::Copy,
                     folder: folder_name.clone(),
@@ -385,8 +559,10 @@ fn build_sync_plan_with_roots(
         }
 
         for stale_file in collect_stale_files(&destination_folder, &seen_relative_files)? {
+            ensure_not_stopped(stop_requested)?;
             if settings.firmware_retention_enabled && is_firmware_path(&stale_file) {
                 summary.skipped_delete_count += 1;
+                emit_scoped_log(event_target, format!("Retain {}", stale_file.display()));
                 actions.push(SyncPlanAction {
                     action: SyncPlanActionKind::SkipDelete,
                     folder: folder_name.clone(),
@@ -397,6 +573,7 @@ fn build_sync_plan_with_roots(
                 });
             } else {
                 summary.delete_count += 1;
+                emit_scoped_log(event_target, format!("Queue delete {}", stale_file.display()));
                 actions.push(SyncPlanAction {
                     action: SyncPlanActionKind::Delete,
                     folder: folder_name.clone(),
@@ -538,34 +715,37 @@ fn copy_file_with_progress(
 
         destination.write_all(&buffer[..read])?;
         transferred_bytes += read as u64;
-
-        let item_progress = if total_bytes == 0 {
-            100.0
-        } else {
-            (transferred_bytes as f64 / total_bytes as f64) * 100.0
-        };
-        let overall_progress =
-            ((action_index as f64) + (item_progress / 100.0)) / total_work_units as f64 * 100.0;
-
-        emit(
-            app,
-            SyncEvent::ItemProgress {
-                display_name: source_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("file")
-                    .to_string(),
-                source_path: source_path.display().to_string(),
-                item_progress,
-                overall_progress,
-                message: format!("Copying {}", source_path.display()),
-            },
-        )
-        .ok();
     }
 
     destination.flush()?;
+    emit(
+        app,
+        SyncEvent::ItemProgress {
+            display_name: source_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("file")
+                .to_string(),
+            source_path: source_path.display().to_string(),
+            item_progress: if total_bytes == 0 || transferred_bytes > 0 {
+                100.0
+            } else {
+                0.0
+            },
+            overall_progress: ((action_index + 1) as f64 / total_work_units as f64) * 100.0,
+            message: format!("Copied {}", source_path.display()),
+        },
+    )
+    .ok();
     Ok(transferred_bytes)
+}
+
+fn ensure_not_stopped(stop_requested: &AtomicBool) -> Result<(), SyncError> {
+    if stop_requested.load(Ordering::SeqCst) {
+        return Err(SyncError::StopRequested);
+    }
+
+    Ok(())
 }
 
 fn is_firmware_path(path: &Path) -> bool {
@@ -580,6 +760,16 @@ fn is_firmware_path(path: &Path) -> bool {
 
 fn emit(app: &AppHandle, event: SyncEvent) -> tauri::Result<()> {
     app.emit(SYNC_EVENT_NAME, event)
+}
+
+fn emit_log(app: &AppHandle, scope: SyncEventScope, line: String) {
+    let _ = emit(app, SyncEvent::LogLine { scope, line });
+}
+
+fn emit_scoped_log(event_target: Option<(&AppHandle, SyncEventScope)>, line: String) {
+    if let Some((app, scope)) = event_target {
+        emit_log(app, scope, line);
+    }
 }
 
 fn push_recent_action(actions: &mut Vec<String>, action: String) {
@@ -650,8 +840,15 @@ mod tests {
         .expect("firmware file");
 
         let settings = AppSettings::default();
-        let plan = build_sync_plan_with_roots(&settings, "Z", &source_root, &destination_root)
-            .expect("build plan");
+        let plan = build_sync_plan_with_roots(
+            &settings,
+            "Z",
+            &source_root,
+            &destination_root,
+            &AtomicBool::new(false),
+            None,
+        )
+        .expect("build plan");
 
         assert_eq!(plan.summary.copy_count, 1);
         assert_eq!(plan.summary.delete_count, 2);
@@ -660,9 +857,15 @@ mod tests {
             firmware_retention_enabled: true,
             ..AppSettings::default()
         };
-        let retained_plan =
-            build_sync_plan_with_roots(&retained_settings, "Z", &source_root, &destination_root)
-                .expect("build retained plan");
+        let retained_plan = build_sync_plan_with_roots(
+            &retained_settings,
+            "Z",
+            &source_root,
+            &destination_root,
+            &AtomicBool::new(false),
+            None,
+        )
+        .expect("build retained plan");
 
         assert_eq!(retained_plan.summary.copy_count, 1);
         assert_eq!(retained_plan.summary.delete_count, 1);

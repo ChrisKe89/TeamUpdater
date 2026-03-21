@@ -117,9 +117,29 @@ pub struct DetectDrivesResponse {
     pub auto_selected: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncEventScope {
+    Preview,
+    Sync,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SyncEvent {
+    PreviewStarted {
+        message: String,
+    },
+    PreviewCompleted {
+        plan: SyncPlan,
+        message: String,
+    },
+    PreviewStopped {
+        message: String,
+    },
+    PreviewFailed {
+        message: String,
+    },
     RunStarted {
         message: String,
     },
@@ -150,6 +170,10 @@ pub enum SyncEvent {
     },
     RunFailed {
         message: String,
+    },
+    LogLine {
+        scope: SyncEventScope,
+        line: String,
     },
 }
 

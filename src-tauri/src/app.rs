@@ -30,6 +30,18 @@ pub fn preview_sync_plan(settings: AppSettings) -> Result<SyncPlan, String> {
 }
 
 #[tauri::command]
+pub fn start_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: AppSettings,
+) -> Result<(), String> {
+    state
+        .coordinator
+        .start_preview(app, settings)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn load_run_history(app: AppHandle) -> Result<Vec<RunAuditRecord>, String> {
     config::load_run_history(&app).map_err(|error| error.to_string())
 }
@@ -55,6 +67,14 @@ pub fn request_sync_stop(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn request_preview_stop(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .coordinator
+        .request_stop()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn quit_app(app: AppHandle) -> Result<(), String> {
     app.exit(0);
     Ok(())
@@ -70,9 +90,11 @@ pub fn run() {
             load_settings,
             save_settings,
             preview_sync_plan,
+            start_preview,
             load_run_history,
             start_sync,
             request_sync_stop,
+            request_preview_stop,
             quit_app
         ])
         .setup(|app| {
