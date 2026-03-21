@@ -98,6 +98,35 @@ export interface SyncRunState {
   lastMessage: string
 }
 
+export type SyncEventScope = 'preview' | 'sync'
+
+export interface TerminalEntry {
+  scope: SyncEventScope
+  line: string
+  timestamp: string
+}
+
+interface PreviewStartedEvent {
+  kind: 'preview_started'
+  message: string
+}
+
+interface PreviewCompletedEvent {
+  kind: 'preview_completed'
+  plan: SyncPlan
+  message: string
+}
+
+interface PreviewStoppedEvent {
+  kind: 'preview_stopped'
+  message: string
+}
+
+interface PreviewFailedEvent {
+  kind: 'preview_failed'
+  message: string
+}
+
 interface RunStartedEvent {
   kind: 'run_started'
   message: string
@@ -143,7 +172,17 @@ interface RunFailedEvent {
   message: string
 }
 
+interface LogLineEvent {
+  kind: 'log_line'
+  scope: SyncEventScope
+  line: string
+}
+
 export type SyncEvent =
+  | PreviewStartedEvent
+  | PreviewCompletedEvent
+  | PreviewStoppedEvent
+  | PreviewFailedEvent
   | RunStartedEvent
   | ItemProgressEvent
   | FileCopiedEvent
@@ -151,3 +190,4 @@ export type SyncEvent =
   | RunCompletedEvent
   | RunStoppedEvent
   | RunFailedEvent
+  | LogLineEvent

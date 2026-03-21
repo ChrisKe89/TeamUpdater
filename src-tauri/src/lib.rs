@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod detection;
+mod logger;
 mod models;
 mod sync_engine;
 

@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Persistent local run history with recorded status, summary counts, and recent file actions.
 - Rust unit tests for the sync planner and CI coverage for `cargo test`.
 - Added a Windows Tauri toolchain preflight script so recurring `link.exe` failures can be diagnosed before starting the desktop app.
+- Added per-session desktop log files under `Logs\` beside the packaged executable, including backend sync traces plus frontend window error and unhandled rejection logging.
 
 ### Changed
 - Refactored the sync engine so preview planning and execution share the same file comparison logic.
 - Expanded the desktop UI with Preview and History views.
 - Standardized the desktop UI around a fixed spacing/radius/button system, rebuilt the Home progress module, and tightened Preview panel hierarchy, collapse controls, and empty states.
+- Tightened the desktop UI density by removing duplicate runtime status in Home, shrinking preview KPI cards, compressing list rows, aligning preview header actions, and demoting the sidebar Quit control.
 - Hardened the bootstrap installer script for copy-based upgrades, rollback, optional relaunch suppression, and silent NSIS installer execution.
 - Improved the Tauri toolchain doctor to detect Visual Studio Build Tools from both standard install roots and distinguish a missing MSVC linker payload from an uninitialized developer shell.
 - Documented the Visual Studio Build Tools requirement and the `pnpm doctor:tauri` workflow in the README and contributing guide.

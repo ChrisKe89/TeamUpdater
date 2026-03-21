@@ -13,6 +13,7 @@ import {
   saveSettings,
   startPreview,
   startSync,
+  writeClientLog,
 } from './lib/desktop'
 import type {
   AppSettings,
@@ -45,6 +46,8 @@ const initialRunState: SyncRunState = {
 }
 
 const TERMINAL_LOG_LIMIT = 400
+type RuntimePhase = 'idle' | 'preview-ready' | 'running' | 'completed' | 'error'
+type RuntimeScope = SyncEventScope | null
 
 function App() {
   const [activeView, setActiveView] = useState<NavView>('home')
@@ -74,6 +77,9 @@ function App() {
   const [isPreviewCopiesOpen, setIsPreviewCopiesOpen] = useState(true)
   const [isPreviewDeletesOpen, setIsPreviewDeletesOpen] = useState(false)
   const [isPreviewSkippedOpen, setIsPreviewSkippedOpen] = useState(false)
+  const [runtimePhase, setRuntimePhase] = useState<RuntimePhase>('idle')
+  const [runtimeScope, setRuntimeScope] = useState<RuntimeScope>(null)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -135,22 +141,33 @@ function App() {
           switch (payload.kind) {
             case 'preview_started':
               setIsPreviewing(true)
+              setRuntimePhase('running')
+              setRuntimeScope('preview')
+              setRuntimeError(null)
               setActiveTerminalScope('preview')
               setPreviewStatusMessage(payload.message)
               setTerminalEntries([])
               return
             case 'preview_completed':
               setIsPreviewing(false)
+              setRuntimePhase('preview-ready')
+              setRuntimeScope('preview')
+              setRuntimeError(null)
               setPreviewPlan(payload.plan)
               setActiveView('preview')
               setPreviewStatusMessage(payload.message)
               return
             case 'preview_stopped':
               setIsPreviewing(false)
+              setRuntimePhase('idle')
+              setRuntimeScope('preview')
               setPreviewStatusMessage(payload.message)
               return
             case 'preview_failed':
               setIsPreviewing(false)
+              setRuntimePhase('error')
+              setRuntimeScope('preview')
+              setRuntimeError(payload.message)
               setPreviewStatusMessage(payload.message)
               setAppError(payload.message)
               return
@@ -162,11 +179,23 @@ function App() {
               setRunState((previous) => reduceSyncEvent(previous, payload))
 
               if (payload.kind === 'run_started') {
+                setRuntimePhase('running')
+                setRuntimeScope('sync')
+                setRuntimeError(null)
                 setActiveTerminalScope('sync')
                 setTerminalEntries([])
               }
 
+              if (payload.kind === 'run_completed' || payload.kind === 'run_stopped') {
+                setRuntimePhase('completed')
+                setRuntimeScope('sync')
+                setRuntimeError(null)
+              }
+
               if (payload.kind === 'run_failed') {
+                setRuntimePhase('error')
+                setRuntimeScope('sync')
+                setRuntimeError(payload.message)
                 setAppError(payload.message)
               }
 
@@ -197,6 +226,56 @@ function App() {
     const timeoutId = window.setTimeout(() => setAppNotice(null), 2400)
     return () => window.clearTimeout(timeoutId)
   }, [appNotice])
+
+  useEffect(() => {
+    void writeClientLog('INFO', 'App mounted.')
+
+    const handleWindowError = (event: ErrorEvent) => {
+      const detail = event.error instanceof Error ? event.error.stack ?? event.error.message : event.message
+      void writeClientLog(
+        'ERROR',
+        `Window error: ${event.message || 'Unknown error'}${detail ? ` | ${detail}` : ''}`,
+      )
+    }
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason =
+        event.reason instanceof Error
+          ? event.reason.stack ?? event.reason.message
+          : String(event.reason)
+      void writeClientLog('ERROR', `Unhandled promise rejection: ${reason}`)
+    }
+
+    window.addEventListener('error', handleWindowError)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
+
+    return () => {
+      window.removeEventListener('error', handleWindowError)
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (runtimePhase === 'running') {
+      setIsHomeTerminalOpen(true)
+    }
+  }, [runtimePhase])
+
+  useEffect(() => {
+    if (!appError) {
+      return
+    }
+
+    void writeClientLog('ERROR', `App error: ${appError}`)
+  }, [appError])
+
+  useEffect(() => {
+    void writeClientLog(
+      'INFO',
+      `Runtime state changed: phase=${runtimePhase}, scope=${runtimeScope ?? 'none'}`,
+    )
+  }, [runtimePhase, runtimeScope])
+
 
   const selectedDrive = draftSettings.selectedDrive
   const selectableDrives = useMemo(() => {
@@ -280,6 +359,14 @@ function App() {
     ])
   }, [runState.deletionLog, syncTerminalEntries])
 
+  useEffect(() => {
+    setIsTransferFeedOpen(transferFeedItems.length > 0)
+  }, [transferFeedItems.length])
+
+  useEffect(() => {
+    setIsCleanupFeedOpen(cleanupFeedItems.length > 0)
+  }, [cleanupFeedItems.length])
+
   const homeCounts = useMemo(
     () => [
       { label: 'Selected folders', value: enabledFolderCount.toString() },
@@ -304,8 +391,49 @@ function App() {
     runState.currentItem?.displayName ?? (runState.isRunning ? 'Preparing transfer' : 'No active transfer')
   const homeTransferDetail =
     runState.currentItem?.sourcePath ?? (runState.isRunning ? runState.lastMessage : 'Run preview or update to start a transfer.')
-  const homeStatusLabel = runState.isRunning ? 'Sync active' : 'Idle'
   const previewCopyDetail = previewPlan ? `${previewPlan.summary.totalCopyBytesLabel} to copy` : undefined
+  const plannedCopyCount = previewPlan?.summary.copyCount ?? runState.summary?.plannedCopyFiles ?? 0
+  const plannedDeleteCount = previewPlan?.summary.deleteCount ?? runState.summary?.plannedDeleteFiles ?? 0
+  const processedCount = runState.copiedCount + runState.deletedCount
+  const processedTotal = plannedCopyCount + plannedDeleteCount
+  const runtimeStatusLabel = getRuntimeStatusLabel(runtimePhase, runtimeScope)
+  const runtimeBadgeTone = getRuntimeBadgeTone(runtimePhase)
+  const runtimeHeadline = getRuntimeHeadline({
+    isPreviewing,
+    phase: runtimePhase,
+    previewCount: previewPlan?.actions.length ?? 0,
+    processedCount,
+    processedTotal,
+    runMessage: runState.lastMessage,
+    runtimeError,
+  })
+  const runtimeCurrentTitle = getRuntimeCurrentTitle({
+    homeTransferTitle,
+    isPreviewing,
+    phase: runtimePhase,
+    previewStatusMessage,
+    runtimeError,
+  })
+  const runtimeCurrentDetail = getRuntimeCurrentDetail({
+    homeTransferDetail,
+    isPreviewing,
+    phase: runtimePhase,
+    previewStatusMessage,
+    runtimeError,
+  })
+  const runtimeCanViewResults = Boolean(previewPlan || runState.summary)
+  const runtimeErrorTitle = runtimeScope === 'preview' ? 'Preview failed' : 'Update failed'
+  const topLevelAppError = runtimePhase === 'error' ? null : appError
+  const homePanelClassName = [
+    'panel',
+    'highlight-panel',
+    'runtime-panel',
+    runtimePhase === 'running' ? 'runtime-panel--running' : '',
+    runtimePhase === 'completed' ? 'runtime-panel--completed' : '',
+    runtimePhase === 'error' ? 'runtime-panel--error' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const persistSettings = async (nextSettings: AppSettings) => {
     setIsSaving(true)
@@ -386,6 +514,9 @@ function App() {
     }
 
     setIsPreviewing(true)
+    setRuntimePhase('running')
+    setRuntimeScope('preview')
+    setRuntimeError(null)
     setAppError(null)
     setAppNotice(null)
     setPreviewStatusMessage('Preview queued.')
@@ -399,8 +530,12 @@ function App() {
       await startPreview(nextSettings)
     } catch (error) {
       setIsPreviewing(false)
-      setPreviewStatusMessage(getErrorMessage(error, 'Unable to build the sync preview.'))
-      setAppError(getErrorMessage(error, 'Unable to build the sync preview.'))
+      const message = getErrorMessage(error, 'Unable to build the sync preview.')
+      setRuntimePhase('error')
+      setRuntimeScope('preview')
+      setRuntimeError(message)
+      setPreviewStatusMessage(message)
+      setAppError(message)
     }
   }
 
@@ -417,11 +552,15 @@ function App() {
       return
     }
 
+    setRuntimePhase('running')
+    setRuntimeScope('sync')
+    setRuntimeError(null)
     setAppError(null)
     setAppNotice(null)
     setActiveTerminalScope('sync')
     setTerminalEntries([])
     setPreviewStatusMessage('Ready to generate a preview.')
+    setActiveView('home')
     setRunState({
       ...initialRunState,
       isRunning: true,
@@ -436,12 +575,16 @@ function App() {
       await saveSettings(nextSettings)
       await startSync(nextSettings)
     } catch (error) {
+      const message = getErrorMessage(error, 'Unable to start sync.')
+      setRuntimePhase('error')
+      setRuntimeScope('sync')
+      setRuntimeError(message)
       setRunState((previous) => ({
         ...previous,
         isRunning: false,
-        lastMessage: getErrorMessage(error, 'Unable to start sync.'),
+        lastMessage: message,
       }))
-      setAppError(getErrorMessage(error, 'Unable to start sync.'))
+      setAppError(message)
     }
   }
 
@@ -475,6 +618,25 @@ function App() {
     setDraftSettings(settings)
     setAppError(null)
     setAppNotice(null)
+  }
+
+  const handleRetryRuntimeAction = async () => {
+    if (runtimeScope === 'preview') {
+      await handlePreview()
+      return
+    }
+
+    await handleStartSync()
+  }
+
+  const handleViewResults = () => {
+    if (previewPlan) {
+      setActiveView('preview')
+      return
+    }
+
+    setActiveView('history')
+    void refreshHistory()
   }
 
   return (
@@ -539,6 +701,10 @@ function App() {
                 <span className="status-dot" />
                 {driveStatus.label}
               </span>
+              <span className={`status-pill status-pill--${runtimeBadgeTone}`}>
+                {runtimePhase === 'running' ? <span className="spinner spinner--inline" /> : <span className="status-dot" />}
+                {runtimeStatusLabel}
+              </span>
               <span className="hint-text">
                 {driveInfo.candidates.length} candidate
                 {driveInfo.candidates.length === 1 ? '' : 's'} detected
@@ -573,7 +739,7 @@ function App() {
           </div>
         </header>
 
-        {appError ? <div className="banner banner--error">{appError}</div> : null}
+        {topLevelAppError ? <div className="banner banner--error">{topLevelAppError}</div> : null}
         {appNotice ? <div className="banner banner--success">{appNotice}</div> : null}
 
         {isInitializing ? (
@@ -585,22 +751,26 @@ function App() {
 
         {!isInitializing && activeView === 'home' ? (
           <section className="view-grid view-grid--home">
-            <section className="panel highlight-panel">
+            <section className={homePanelClassName}>
               <div className="progress-module-header">
                 <div className="progress-module-copy">
-                  <span className="section-kicker">Current transfer</span>
-                  <h2>{homeTransferTitle}</h2>
-                  <p className="transfer-path">{homeTransferDetail}</p>
+                  <span className="section-kicker">Current run</span>
+                  <h2>{runtimeCurrentTitle}</h2>
+                  <p className="transfer-path">{runtimeCurrentDetail}</p>
+                  <p className="runtime-headline">{runtimeHeadline}</p>
                 </div>
                 <div className="progress-module-summary">
-                  <span className={`status-pill status-pill--${runState.isRunning ? 'online' : 'offline'}`}>
-                    <span className="status-dot" />
-                    {homeStatusLabel}
-                  </span>
-                  <div className="percentage-block">
-                    <span>Overall</span>
-                    <strong>{formatProgress(runState.overallProgress)}%</strong>
-                  </div>
+                  {runtimePhase === 'error' ? (
+                    <div className="runtime-callout runtime-callout--error">
+                      <strong>{runtimeErrorTitle}</strong>
+                      <span>{runtimeError ?? runState.lastMessage}</span>
+                    </div>
+                  ) : (
+                    <div className="percentage-block">
+                      <span>Overall progress</span>
+                      <strong>{formatProgress(runState.overallProgress)}%</strong>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -611,38 +781,74 @@ function App() {
                     <strong>{item.value}</strong>
                   </div>
                 ))}
+                <div className="inline-stat inline-stat--runtime">
+                  <span>Processed</span>
+                  <strong>{processedCount.toString()}</strong>
+                  <small>{processedTotal > 0 ? `${processedCount} / ${processedTotal} files` : 'Awaiting planner totals'}</small>
+                </div>
+                <div className="inline-stat inline-stat--runtime">
+                  <span>Errors</span>
+                  <strong>{runtimePhase === 'error' ? '1' : '0'}</strong>
+                  <small>{runtimePhase === 'error' ? 'Run needs action' : 'No active failures'}</small>
+                </div>
               </div>
 
               <div className="progress-stack">
-                <ProgressBar label="Current file" value={runState.itemProgress} />
-                <ProgressBar label="Overall queue" value={runState.overallProgress} />
+                <ProgressBar
+                  detail={runtimeScope === 'preview' ? previewStatusMessage : `${formatProgress(runState.itemProgress)}% complete`}
+                  label="Current file"
+                  progressLabel={runtimeScope === 'preview' ? (isPreviewing ? 'Working' : 'Ready') : `${formatProgress(runState.itemProgress)}%`}
+                  value={runState.itemProgress}
+                />
+                <ProgressBar
+                  detail={processedTotal > 0 ? `${processedCount} / ${processedTotal} files` : 'Waiting for transfer totals'}
+                  label="Overall queue"
+                  progressLabel={processedTotal > 0 ? `${processedCount} / ${processedTotal}` : `${formatProgress(runState.overallProgress)}%`}
+                  value={runState.overallProgress}
+                />
               </div>
 
               <div className="action-row">
                 <button
                   className="secondary-button"
-                  disabled={!canStartSync || isPreviewing}
+                  disabled={!canStartSync || runtimePhase === 'running'}
                   onClick={handlePreview}
                   type="button"
                 >
-                  {isPreviewing ? 'Running preview...' : 'Run preview'}
+                  {isPreviewing ? 'Running preview...' : runtimePhase === 'completed' ? 'Run preview again' : 'Run preview'}
                 </button>
                 <button
                   className="primary-button"
-                  disabled={!canStartSync}
+                  disabled={!canStartSync || runtimePhase === 'running'}
                   onClick={handleStartSync}
                   type="button"
                 >
-                  Run update
+                  {runtimePhase === 'completed' ? 'Run update again' : 'Run update'}
                 </button>
-                <button
-                  className="utility-button utility-button--danger"
-                  disabled={!runState.isRunning}
-                  onClick={handleStopSync}
-                  type="button"
-                >
-                  Stop
-                </button>
+                {runtimePhase === 'running' ? (
+                  <button
+                    className="utility-button utility-button--danger utility-button--strong"
+                    onClick={runtimeScope === 'preview' ? handleStopPreview : handleStopSync}
+                    type="button"
+                  >
+                    Stop
+                  </button>
+                ) : null}
+                {runtimePhase === 'error' ? (
+                  <>
+                    <button className="utility-button utility-button--danger utility-button--strong" onClick={() => void handleRetryRuntimeAction()} type="button">
+                      Retry
+                    </button>
+                    <button className="utility-button" onClick={() => setIsHomeTerminalOpen(true)} type="button">
+                      View logs
+                    </button>
+                  </>
+                ) : null}
+                {runtimePhase === 'completed' && runtimeCanViewResults ? (
+                  <button className="utility-button" onClick={handleViewResults} type="button">
+                    View results
+                  </button>
+                ) : null}
               </div>
             </section>
 
@@ -683,17 +889,28 @@ function App() {
         {!isInitializing && activeView === 'preview' ? (
           <section className="settings-panel">
             <section
-              className={`panel preview-header ${isPreviewSummaryOpen ? 'is-open' : 'is-collapsed'}`.trim()}
+              className={`panel preview-header ${runtimePhase === 'running' && runtimeScope === 'preview' ? 'runtime-panel runtime-panel--running' : ''} ${runtimePhase === 'preview-ready' && runtimeScope === 'preview' ? 'runtime-panel runtime-panel--completed' : ''} ${runtimePhase === 'error' && runtimeScope === 'preview' ? 'runtime-panel runtime-panel--error' : ''} ${isPreviewSummaryOpen ? 'is-open' : 'is-collapsed'}`.trim()}
             >
               <div className="panel-heading">
                 <div>
                   <p className="eyebrow">Sync Preview</p>
                   <h2>{previewPlan ? 'Planned file actions' : 'No preview generated yet'}</h2>
+                  <p className="transfer-path preview-runtime-copy">{previewStatusMessage}</p>
                 </div>
                 <div className="panel-actions">
+                  <span className={`status-pill status-pill--${runtimeBadgeTone}`}>
+                    {runtimePhase === 'running' && runtimeScope === 'preview' ? <span className="spinner spinner--inline" /> : <span className="status-dot" />}
+                    {runtimeScope === 'preview'
+                      ? runtimePhase === 'preview-ready'
+                        ? 'Preview ready'
+                        : runtimeStatusLabel
+                      : previewPlan
+                        ? 'Preview ready'
+                        : 'Idle'}
+                  </span>
                   <button
                     className="secondary-button"
-                    disabled={!canStartSync || isPreviewing}
+                    disabled={!canStartSync || runtimePhase === 'running'}
                     onClick={handlePreview}
                     type="button"
                   >
@@ -701,12 +918,27 @@ function App() {
                   </button>
                   <button
                     className="primary-button"
-                    disabled={!canStartSync}
+                    disabled={!canStartSync || runtimePhase === 'running'}
                     onClick={handleStartSync}
                     type="button"
                   >
                     Run update
                   </button>
+                  {runtimePhase === 'running' && runtimeScope === 'preview' ? (
+                    <button className="utility-button utility-button--danger utility-button--strong" onClick={handleStopPreview} type="button">
+                      Stop
+                    </button>
+                  ) : null}
+                  {runtimePhase === 'error' && runtimeScope === 'preview' ? (
+                    <>
+                      <button className="utility-button utility-button--danger utility-button--strong" onClick={() => void handleRetryRuntimeAction()} type="button">
+                        Retry
+                      </button>
+                      <button className="utility-button" onClick={() => setIsPreviewTerminalOpen(true)} type="button">
+                        View logs
+                      </button>
+                    </>
+                  ) : null}
                   <CollapseButton
                     isOpen={isPreviewSummaryOpen}
                     onToggle={() => setIsPreviewSummaryOpen((previous) => !previous)}
@@ -718,25 +950,29 @@ function App() {
               {isPreviewSummaryOpen && previewPlan ? (
                 <div className="stats-grid">
                   <StatCard
+                    density="compact"
                     detail={previewCopyDetail}
                     label="Files to copy"
                     value={previewPlan.summary.copyCount.toString()}
                   />
                   <StatCard
+                    density="compact"
                     detail="Queued for deletion"
                     label="Files to delete"
                     value={previewPlan.summary.deleteCount.toString()}
                   />
                   <StatCard
+                    density="compact"
                     detail={
                       previewPlan.firmwareRetentionEnabled
                         ? 'Retained by firmware protection'
-                        : 'Disabled for this run'
+                        : 'Retention off for this preview'
                     }
                     label="Skipped deletes"
                     value={previewPlan.summary.skippedDeleteCount.toString()}
                   />
                   <StatCard
+                    density="compact-meta"
                     detail={`${previewPlan.selectedDrive}:\\ source`}
                     label="Generated"
                     value={formatTimestamp(previewPlan.generatedAt)}
@@ -746,7 +982,7 @@ function App() {
 
               {isPreviewSummaryOpen && !previewPlan ? (
                 <EmptyState
-                  detail="Run preview to inspect copies, deletions, and retained firmware paths."
+                  detail="Run preview to inspect files to copy, deletes, and retained firmware paths."
                   title="No preview available"
                 />
               ) : null}
@@ -994,9 +1230,19 @@ function NavButton({
   )
 }
 
-function StatCard({ detail, label, value }: { detail?: string; label: string; value: string }) {
+function StatCard({
+  density = 'default',
+  detail,
+  label,
+  value,
+}: {
+  density?: 'compact' | 'compact-meta' | 'default'
+  detail?: string
+  label: string
+  value: string
+}) {
   return (
-    <article className="stat-card">
+    <article className={`stat-card stat-card--${density}`}>
       <p>{label}</p>
       <strong>{value}</strong>
       {detail ? <span>{detail}</span> : null}
@@ -1004,18 +1250,29 @@ function StatCard({ detail, label, value }: { detail?: string; label: string; va
   )
 }
 
-function ProgressBar({ label, value }: { label: string; value: number }) {
+function ProgressBar({
+  detail,
+  label,
+  progressLabel,
+  value,
+}: {
+  detail?: string
+  label: string
+  progressLabel?: string
+  value: number
+}) {
   const safeValue = clampProgress(value)
 
   return (
     <div className="progress-bar">
       <div className="progress-labels">
         <span>{label}</span>
-        <span>{formatProgress(safeValue)}%</span>
+        <span>{progressLabel ?? `${formatProgress(safeValue)}%`}</span>
       </div>
       <div className="progress-track">
-        <div className="progress-fill" style={{ width: `${safeValue}%` }} />
+        <div className={`progress-fill ${safeValue > 0 && safeValue < 100 ? 'is-animated' : ''}`} style={{ width: `${safeValue}%` }} />
       </div>
+      {detail ? <p className="progress-detail">{detail}</p> : null}
     </div>
   )
 }
@@ -1064,9 +1321,11 @@ function PlanPanel({
         <div className="plan-list">
           {actions.map((action, index) => (
             <article className="plan-card" key={`${action.destinationPath}-${index}`}>
-              <strong>{action.destinationPath}</strong>
-              {action.sourcePath ? <span>Source: {action.sourcePath}</span> : null}
-              <span>{action.reason}</span>
+              <strong title={action.destinationPath}>{getPathLeaf(action.destinationPath)}</strong>
+              <span title={action.sourcePath ?? action.destinationPath}>
+                {action.sourcePath ?? action.destinationPath}
+              </span>
+              <span className="plan-status">{action.reason}</span>
             </article>
           ))}
         </div>
@@ -1342,6 +1601,12 @@ function formatProgress(value: number) {
   return Math.round(clampProgress(value))
 }
 
+function getPathLeaf(value: string) {
+  const normalized = value.replace(/\\/g, '/')
+  const segments = normalized.split('/').filter(Boolean)
+  return segments.at(-1) ?? value
+}
+
 function dedupePreserveOrder(items: string[]) {
   const seen = new Set<string>()
   const result: string[] = []
@@ -1361,6 +1626,143 @@ function dedupePreserveOrder(items: string[]) {
 
 function statusTone(status: RunAuditRecord['status']) {
   return status === 'completed' ? 'online' : 'offline'
+}
+
+function getRuntimeBadgeTone(phase: RuntimePhase) {
+  switch (phase) {
+    case 'running':
+      return 'busy'
+    case 'completed':
+    case 'preview-ready':
+      return 'online'
+    case 'error':
+      return 'offline'
+    default:
+      return 'neutral'
+  }
+}
+
+function getRuntimeStatusLabel(phase: RuntimePhase, scope: RuntimeScope) {
+  switch (phase) {
+    case 'running':
+      return scope === 'preview' ? 'Running preview' : 'Running update'
+    case 'preview-ready':
+      return 'Preview ready'
+    case 'completed':
+      return 'Completed'
+    case 'error':
+      return 'Action required'
+    default:
+      return 'Idle'
+  }
+}
+
+function getRuntimeHeadline({
+  isPreviewing,
+  phase,
+  previewCount,
+  processedCount,
+  processedTotal,
+  runMessage,
+  runtimeError,
+}: {
+  isPreviewing: boolean
+  phase: RuntimePhase
+  previewCount: number
+  processedCount: number
+  processedTotal: number
+  runMessage: string
+  runtimeError: string | null
+}) {
+  if (phase === 'error') {
+    return runtimeError ?? 'Run failed.'
+  }
+
+  if (isPreviewing) {
+    return 'Building preview plan and collecting file actions.'
+  }
+
+  if (phase === 'running') {
+    return processedTotal > 0
+      ? `Processing ${processedCount} of ${processedTotal} files.`
+      : runMessage
+  }
+
+  if (phase === 'preview-ready') {
+    return `${previewCount} planned actions ready for review.`
+  }
+
+  if (phase === 'completed') {
+    return processedTotal > 0
+      ? `Completed ${processedCount} of ${processedTotal} planned file actions.`
+      : runMessage
+  }
+
+  return 'Choose a run mode to start syncing.'
+}
+
+function getRuntimeCurrentTitle({
+  homeTransferTitle,
+  isPreviewing,
+  phase,
+  previewStatusMessage,
+  runtimeError,
+}: {
+  homeTransferTitle: string
+  isPreviewing: boolean
+  phase: RuntimePhase
+  previewStatusMessage: string
+  runtimeError: string | null
+}) {
+  if (phase === 'error') {
+    return 'Run needs attention'
+  }
+
+  if (isPreviewing) {
+    return 'Preparing preview'
+  }
+
+  if (phase === 'preview-ready') {
+    return 'Preview is ready'
+  }
+
+  if (phase === 'completed') {
+    return 'Last run complete'
+  }
+
+  return homeTransferTitle || previewStatusMessage || runtimeError || 'No active transfer'
+}
+
+function getRuntimeCurrentDetail({
+  homeTransferDetail,
+  isPreviewing,
+  phase,
+  previewStatusMessage,
+  runtimeError,
+}: {
+  homeTransferDetail: string
+  isPreviewing: boolean
+  phase: RuntimePhase
+  previewStatusMessage: string
+  runtimeError: string | null
+}) {
+  if (phase === 'error') {
+    return runtimeError ?? 'Review the logs and retry when ready.'
+  }
+
+  if (isPreviewing) {
+    return previewStatusMessage
+  }
+
+  if (phase === 'preview-ready') {
+    return 'Review planned copies, deletes, and retained firmware paths before updating.'
+  }
+
+  if (phase === 'completed') {
+    return 'Review results or start another run.'
+  }
+
+  return homeTransferDetail
 }
 
 export default App

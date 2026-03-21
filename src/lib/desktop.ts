@@ -52,6 +52,14 @@ export async function previewSyncPlan(settings: AppSettings): Promise<SyncPlan> 
   return invoke<SyncPlan>('preview_sync_plan', { settings })
 }
 
+export async function startPreview(settings: AppSettings) {
+  if (!isDesktopRuntime) {
+    throw new Error('Preview is only available in the Tauri desktop runtime.')
+  }
+
+  return invoke<void>('start_preview', { settings })
+}
+
 export async function loadRunHistory(): Promise<RunAuditRecord[]> {
   if (!isDesktopRuntime) {
     return []
@@ -74,6 +82,28 @@ export async function requestSyncStop() {
   }
 
   return invoke<void>('request_sync_stop')
+}
+
+export async function requestPreviewStop() {
+  if (!isDesktopRuntime) {
+    throw new Error('Stop requests are only available in the Tauri desktop runtime.')
+  }
+
+  return invoke<void>('request_preview_stop')
+}
+
+export async function writeClientLog(level: string, message: string) {
+  if (!isDesktopRuntime) {
+    if (level === 'ERROR') {
+      console.error(message)
+      return
+    }
+
+    console.log(message)
+    return
+  }
+
+  return invoke<void>('write_client_log', { level, message })
 }
 
 export async function quitApp() {
