@@ -1,5 +1,5 @@
 use crate::{
-    config, detection,
+    app::AppState, config, detection,
     models::{
         AppSettings, RunAuditRecord, RunAuditStatus, SyncEvent, SyncEventScope, SyncPlan,
         SyncPlanAction, SyncPlanActionKind, SyncPlanSummary, SyncSummary, FOLDER_DEFINITIONS,
@@ -17,7 +17,7 @@ use std::{
     thread,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use walkdir::WalkDir;
 
@@ -219,6 +219,13 @@ pub enum SyncError {
     MissingSourceRoot(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("{operation} failed for {path}: {source}")]
+    IoWithContext {
+        operation: &'static str,
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("walk error: {0}")]
     Walk(#[from] walkdir::Error),
     #[error("source path is outside the expected root")]
@@ -360,7 +367,7 @@ fn run_sync(
                 .ok();
 
                 if let Some(parent) = destination_path.parent() {
-                    fs::create_dir_all(parent)?;
+                    create_dir_all(parent)?;
                 }
 
                 emit_log(
@@ -400,7 +407,7 @@ fn run_sync(
                         SyncEventScope::Sync,
                         format!("Removing {}", destination_path.display()),
                     );
-                    fs::remove_file(&destination_path)?;
+                    remove_file(&destination_path)?;
                     summary.deleted_files += 1;
                     push_recent_action(
                         &mut recent_actions,
@@ -539,7 +546,7 @@ fn build_sync_plan_with_roots(
             seen_relative_files.insert(relative_path.to_path_buf());
 
             if should_copy(&source_file, &destination_file)? {
-                let size_bytes = fs::metadata(&source_file)?.len();
+                let size_bytes = metadata(&source_file)?.len();
                 summary.copy_count += 1;
                 summary.total_copy_bytes += size_bytes;
                 emit_scoped_log(event_target, format!("Queue copy {}", destination_file.display()));
@@ -666,8 +673,8 @@ fn cleanup_empty_dirs(root: &Path) -> Result<(), SyncError> {
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_dir())
     {
-        if entry.path() != root && fs::read_dir(entry.path())?.next().is_none() {
-            fs::remove_dir(entry.path())?;
+        if entry.path() != root && read_dir(entry.path())?.next().is_none() {
+            remove_dir(entry.path())?;
         }
     }
 
@@ -679,8 +686,8 @@ fn should_copy(source_path: &Path, destination_path: &Path) -> Result<bool, Sync
         return Ok(true);
     }
 
-    let source_metadata = fs::metadata(source_path)?;
-    let destination_metadata = fs::metadata(destination_path)?;
+    let source_metadata = metadata(source_path)?;
+    let destination_metadata = metadata(destination_path)?;
 
     if source_metadata.len() != destination_metadata.len() {
         return Ok(true);
@@ -701,23 +708,32 @@ fn copy_file_with_progress(
     total_work_units: usize,
     action_index: usize,
 ) -> Result<u64, SyncError> {
-    let mut source = fs::File::open(source_path)?;
-    let mut destination = fs::File::create(destination_path)?;
-    let total_bytes = source.metadata()?.len();
+    let mut source = open_file(source_path)?;
+    let mut destination = create_file(destination_path)?;
+    let total_bytes = source
+        .metadata()
+        .map_err(|source_error| io_error("read metadata", source_path, source_error))?
+        .len();
     let mut transferred_bytes = 0_u64;
     let mut buffer = vec![0_u8; 1024 * 256];
 
     loop {
-        let read = source.read(&mut buffer)?;
+        let read = source
+            .read(&mut buffer)
+            .map_err(|source_error| io_error("read file", source_path, source_error))?;
         if read == 0 {
             break;
         }
 
-        destination.write_all(&buffer[..read])?;
+        destination
+            .write_all(&buffer[..read])
+            .map_err(|source_error| io_error("write file", destination_path, source_error))?;
         transferred_bytes += read as u64;
     }
 
-    destination.flush()?;
+    destination
+        .flush()
+        .map_err(|source_error| io_error("flush file", destination_path, source_error))?;
     emit(
         app,
         SyncEvent::ItemProgress {
@@ -763,6 +779,11 @@ fn emit(app: &AppHandle, event: SyncEvent) -> tauri::Result<()> {
 }
 
 fn emit_log(app: &AppHandle, scope: SyncEventScope, line: String) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state
+            .logger
+            .log("INFO", format!("[{:?}] {line}", scope).to_lowercase());
+    }
     let _ = emit(app, SyncEvent::LogLine { scope, line });
 }
 
@@ -777,6 +798,42 @@ fn push_recent_action(actions: &mut Vec<String>, action: String) {
     if actions.len() > RECENT_ACTION_LIMIT {
         actions.remove(0);
     }
+}
+
+fn io_error(operation: &'static str, path: &Path, source: std::io::Error) -> SyncError {
+    SyncError::IoWithContext {
+        operation,
+        path: path.display().to_string(),
+        source,
+    }
+}
+
+fn metadata(path: &Path) -> Result<fs::Metadata, SyncError> {
+    fs::metadata(path).map_err(|source| io_error("read metadata", path, source))
+}
+
+fn create_dir_all(path: &Path) -> Result<(), SyncError> {
+    fs::create_dir_all(path).map_err(|source| io_error("create directory", path, source))
+}
+
+fn remove_file(path: &Path) -> Result<(), SyncError> {
+    fs::remove_file(path).map_err(|source| io_error("remove file", path, source))
+}
+
+fn remove_dir(path: &Path) -> Result<(), SyncError> {
+    fs::remove_dir(path).map_err(|source| io_error("remove directory", path, source))
+}
+
+fn read_dir(path: &Path) -> Result<fs::ReadDir, SyncError> {
+    fs::read_dir(path).map_err(|source| io_error("read directory", path, source))
+}
+
+fn open_file(path: &Path) -> Result<fs::File, SyncError> {
+    fs::File::open(path).map_err(|source| io_error("open file", path, source))
+}
+
+fn create_file(path: &Path) -> Result<fs::File, SyncError> {
+    fs::File::create(path).map_err(|source| io_error("create file", path, source))
 }
 
 fn timestamp_now_ms() -> String {
