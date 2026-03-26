@@ -1,4 +1,11 @@
-export type NavView = 'home' | 'preview' | 'history' | 'folder-selection' | 'firmware-retention'
+export type NavView =
+  | 'home'
+  | 'preview'
+  | 'history'
+  | 'folder-selection'
+  | 'firmware-retention'
+
+export type SourceMode = 'mapped-drive' | 'sharefile-api'
 
 export interface FolderDefinition {
   key: string
@@ -6,8 +13,17 @@ export interface FolderDefinition {
   isMandatory: boolean
 }
 
+export interface ShareFileApiSettings {
+  tenantSubdomain: string
+  rootItemId: string | null
+  rootDisplayPath: string | null
+}
+
 export interface AppSettings {
+  sourceMode: SourceMode
   selectedDrive: string | null
+  destinationRoot: string
+  shareFileApi: ShareFileApiSettings
   firmwareRetentionEnabled: boolean
   folders: Record<string, boolean>
 }
@@ -44,7 +60,9 @@ export type SyncPlanActionKind = 'copy' | 'delete' | 'skip_delete'
 export interface SyncPlanAction {
   action: SyncPlanActionKind
   folder: string
+  sourceKind: SourceMode
   sourcePath: string | null
+  sourceItemId: string | null
   destinationPath: string
   reason: string
   sizeBytes: number | null
@@ -60,7 +78,8 @@ export interface SyncPlanSummary {
 
 export interface SyncPlan {
   generatedAt: string
-  selectedDrive: string
+  sourceMode: SourceMode
+  selectedDrive: string | null
   sourceRoot: string
   destinationRoot: string
   firmwareRetentionEnabled: boolean
@@ -75,6 +94,7 @@ export interface RunAuditRecord {
   startedAt: string
   finishedAt: string
   status: RunAuditStatus
+  sourceMode: SourceMode
   selectedDrive: string | null
   sourceRoot: string | null
   destinationRoot: string
@@ -104,6 +124,35 @@ export interface TerminalEntry {
   scope: SyncEventScope
   line: string
   timestamp: string
+}
+
+export interface ShareFileAuthConfig {
+  clientId: string
+  clientSecret: string
+  redirectUri: string
+}
+
+export interface ShareFileAuthStatus {
+  isAuthenticated: boolean
+  tenantSubdomain: string | null
+  expiresAt: string | null
+  hasRefreshToken: boolean
+  authUrl: string | null
+  message: string
+}
+
+export interface ShareFileAuthSession {
+  authUrl: string
+  state: string
+}
+
+export interface ShareFileBrowseNode {
+  id: string
+  parentId: string | null
+  name: string
+  displayPath: string
+  isFolder: boolean
+  sizeBytes: number | null
 }
 
 interface PreviewStartedEvent {

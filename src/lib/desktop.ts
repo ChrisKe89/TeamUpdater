@@ -1,5 +1,14 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AppSettings, DetectDrivesResponse, RunAuditRecord, SyncPlan } from '../types'
+import type {
+  AppSettings,
+  DetectDrivesResponse,
+  RunAuditRecord,
+  ShareFileAuthConfig,
+  ShareFileAuthSession,
+  ShareFileAuthStatus,
+  ShareFileBrowseNode,
+  SyncPlan,
+} from '../types'
 import { buildDefaultSettings, mergeSettings } from './settings'
 
 export const isDesktopRuntime =
@@ -90,6 +99,65 @@ export async function requestPreviewStop() {
   }
 
   return invoke<void>('request_preview_stop')
+}
+
+export async function getShareFileAuthStatus(): Promise<ShareFileAuthStatus> {
+  if (!isDesktopRuntime) {
+    return {
+      isAuthenticated: false,
+      tenantSubdomain: null,
+      expiresAt: null,
+      hasRefreshToken: false,
+      authUrl: null,
+      message: 'ShareFile auth is only available in the desktop runtime.',
+    }
+  }
+
+  return invoke<ShareFileAuthStatus>('get_sharefile_auth_status')
+}
+
+export async function beginShareFileAuth(
+  config: ShareFileAuthConfig,
+): Promise<ShareFileAuthSession> {
+  if (!isDesktopRuntime) {
+    throw new Error('ShareFile auth is only available in the Tauri desktop runtime.')
+  }
+
+  return invoke<ShareFileAuthSession>('begin_sharefile_auth', { config })
+}
+
+export async function completeShareFileAuth(
+  callbackUrl: string,
+): Promise<ShareFileAuthStatus> {
+  if (!isDesktopRuntime) {
+    throw new Error('ShareFile auth is only available in the Tauri desktop runtime.')
+  }
+
+  return invoke<ShareFileAuthStatus>('complete_sharefile_auth', { callbackUrl })
+}
+
+export async function listShareFileRootItems(): Promise<ShareFileBrowseNode[]> {
+  if (!isDesktopRuntime) {
+    return []
+  }
+
+  return invoke<ShareFileBrowseNode[]>('list_sharefile_root_items')
+}
+
+export async function browseShareFileFolder(parentId: string): Promise<ShareFileBrowseNode[]> {
+  if (!isDesktopRuntime) {
+    return []
+  }
+
+  return invoke<ShareFileBrowseNode[]>('browse_sharefile_folder', { parentId })
+}
+
+export async function disconnectShareFileAccount() {
+  if (!isDesktopRuntime) {
+    return
+  }
+
+  return invoke<void>('disconnect_sharefile_account')
 }
 
 export async function writeClientLog(level: string, message: string) {

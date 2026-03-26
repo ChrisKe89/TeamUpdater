@@ -1,15 +1,16 @@
 # TeamUpdater V3
 
-Windows desktop app for mirroring selected ShareFile folders to `C:\` from the logged-in ShareFile mapped drive.
+Windows desktop app for mirroring selected ShareFile folders to `C:\` from either the logged-in ShareFile mapped drive or the ShareFile REST API.
 
 This project follows the repository-wide standards described in the root `AGENTS.md`.
 
 ## Features
 
 - Auto-detects ShareFile mapped drives by probing `\[DriveLetter]\Folders\FBAU-PWS\DATA\For Laptops\CUSP\CUSP-Data`.
+- Supports a ShareFile API source mode with OAuth 2.0 auth, remote folder browsing, and API-backed file download during sync.
 - Allows manual drive selection when auto-detection is ambiguous.
 - Generates a preview before execution so operators can inspect copies, deletes, and firmware-retained files.
-- Mirrors selected folders to `C:\[Folder]`.
+- Mirrors selected folders to `C:\[Folder]` by default, with an overrideable destination root in settings.
 - Keeps `CUSPAPPS` and `TeamOSB` mandatory and always enabled.
 - Streams live progress, transfer logs, and deletion logs during sync.
 - Supports optional firmware retention to preserve deletes under `*\Firmware\*`.
@@ -25,7 +26,7 @@ This project follows the repository-wide standards described in the root `AGENTS
 - `pnpm` 10+
 - Rust stable toolchain
 - Visual Studio 2022 Build Tools with the `Desktop development with C++` workload
-- Windows machine with ShareFile exposed as a mapped drive
+- Windows machine with ShareFile exposed as a mapped drive, or a ShareFile OAuth app with client credentials and redirect URI
 
 ### Install dependencies
 
@@ -68,13 +69,22 @@ Settings are stored as JSON in the user config directory:
 
 Stored settings include:
 
+- Selected source mode
 - Selected drive letter
+- Selected ShareFile API tenant and remote root folder
+- Destination root
 - Enabled folder switches
 - Firmware retention flag
 
 Run history is stored separately in the local app data directory:
 
 - `%LOCALAPPDATA%\TeamUpdaterV3\run-history.json`
+
+ShareFile auth material is stored separately from general settings:
+
+- `%LOCALAPPDATA%\TeamUpdaterV3\sharefile-auth.json`
+
+The auth store contains the OAuth client configuration needed to reconnect plus the current token set and pending auth state. Keep it restricted to the signed-in operator profile.
 
 Desktop session logs are written beside the packaged executable:
 
@@ -97,6 +107,7 @@ For the standard bootstrap install, that means:
 ## Troubleshooting
 
 - If the status indicator is red, use **Refresh drives** and verify the ShareFile mapped drive is mounted.
+- If ShareFile API mode shows as disconnected, reopen **ShareFile auth**, complete the browser sign-in flow, and paste the full callback URL back into the app.
 - Browser preview cannot run sync operations; use the Tauri runtime for actual file copying.
 - If the packaged desktop UI blanks out or crashes during a run, inspect the latest file under `Logs\` beside the installed executable. The desktop session log includes backend sync messages plus frontend window errors and unhandled promise rejections.
 - If the Tauri build fails with `cargo metadata ... program not found`, confirm the Rust toolchain is installed and that `%USERPROFILE%\.cargo\bin` is available in `PATH`.

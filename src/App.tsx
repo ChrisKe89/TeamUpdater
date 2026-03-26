@@ -3,11 +3,17 @@ import { listen } from '@tauri-apps/api/event'
 import './App.css'
 import { buildDefaultSettings, getFolderDefinitions, mergeSettings } from './lib/settings'
 import {
+  beginShareFileAuth,
+  browseShareFileFolder,
   detectShareFileDrives,
+  disconnectShareFileAccount,
+  getShareFileAuthStatus,
   isDesktopRuntime,
+  listShareFileRootItems,
   loadRunHistory,
   loadSettings,
   quitApp,
+  completeShareFileAuth,
   requestPreviewStop,
   requestSyncStop,
   saveSettings,
@@ -21,6 +27,10 @@ import type {
   FolderDefinition,
   NavView,
   RunAuditRecord,
+  ShareFileAuthConfig,
+  ShareFileAuthStatus,
+  ShareFileBrowseNode,
+  SourceMode,
   SyncEvent,
   SyncEventScope,
   SyncPlan,
@@ -43,6 +53,21 @@ const initialRunState: SyncRunState = {
   deletionLog: [],
   summary: null,
   lastMessage: 'Ready to sync.',
+}
+
+const initialShareFileAuthStatus: ShareFileAuthStatus = {
+  isAuthenticated: false,
+  tenantSubdomain: null,
+  expiresAt: null,
+  hasRefreshToken: false,
+  authUrl: null,
+  message: 'ShareFile account is not connected.',
+}
+
+const initialShareFileAuthConfig: ShareFileAuthConfig = {
+  clientId: '',
+  clientSecret: '',
+  redirectUri: '',
 }
 
 const TERMINAL_LOG_LIMIT = 400
@@ -80,6 +105,17 @@ function App() {
   const [runtimePhase, setRuntimePhase] = useState<RuntimePhase>('idle')
   const [runtimeScope, setRuntimeScope] = useState<RuntimeScope>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [shareFileAuthStatus, setShareFileAuthStatus] = useState<ShareFileAuthStatus>(
+    initialShareFileAuthStatus,
+  )
+  const [shareFileAuthConfig, setShareFileAuthConfig] = useState<ShareFileAuthConfig>(
+    initialShareFileAuthConfig,
+  )
+  const [shareFileCallbackUrl, setShareFileCallbackUrl] = useState('')
+  const [shareFileBrowseItems, setShareFileBrowseItems] = useState<ShareFileBrowseNode[]>([])
+  const [shareFileBrowsePath, setShareFileBrowsePath] = useState<ShareFileBrowseNode[]>([])
+  const [isShareFileAuthBusy, setIsShareFileAuthBusy] = useState(false)
+  const [isShareFileBrowseBusy, setIsShareFileBrowseBusy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -105,12 +141,50 @@ function App() {
       }
     }
 
+    const refreshShareFileAuthFromRuntime = async () => {
+      if (!isDesktopRuntime || cancelled) {
+        return initialShareFileAuthStatus
+      }
+
+      return getShareFileAuthStatus()
+    }
+
+    const loadInitialShareFileBrowser = async (
+      mergedSettings: AppSettings,
+      authStatus: ShareFileAuthStatus,
+    ) => {
+      if (
+        !isDesktopRuntime ||
+        cancelled ||
+        !authStatus.isAuthenticated ||
+        mergedSettings.sourceMode !== 'sharefile-api'
+      ) {
+        return
+      }
+
+      try {
+        const items = mergedSettings.shareFileApi.rootItemId
+          ? await browseShareFileFolder(mergedSettings.shareFileApi.rootItemId)
+          : await listShareFileRootItems()
+
+        if (!cancelled) {
+          setShareFileBrowseItems(items)
+          setShareFileBrowsePath([])
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAppError(getErrorMessage(error, 'Unable to load ShareFile folders.'))
+        }
+      }
+    }
+
     const init = async () => {
       try {
-        const [loadedSettings, detectedDrives, loadedHistory] = await Promise.all([
+        const [loadedSettings, detectedDrives, loadedHistory, authStatus] = await Promise.all([
           loadSettings(),
           detectShareFileDrives(),
           loadRunHistory(),
+          refreshShareFileAuthFromRuntime(),
         ])
 
         if (cancelled) {
@@ -119,9 +193,20 @@ function App() {
 
         const mergedSettings = mergeSettings(loadedSettings, detectedDrives.autoSelected)
         setDriveInfo(detectedDrives)
+        setShareFileAuthStatus(authStatus)
         setSettings(mergedSettings)
         setDraftSettings(mergedSettings)
         setHistoryRecords(loadedHistory)
+        if (!mergedSettings.shareFileApi.tenantSubdomain && authStatus.tenantSubdomain) {
+          setDraftSettings((previous) => ({
+            ...previous,
+            shareFileApi: {
+              ...previous.shareFileApi,
+              tenantSubdomain: authStatus.tenantSubdomain ?? '',
+            },
+          }))
+        }
+        await loadInitialShareFileBrowser(mergedSettings, authStatus)
       } catch (error) {
         if (!cancelled) {
           setAppError(getErrorMessage(error, 'Unable to initialise the app.'))
@@ -276,8 +361,10 @@ function App() {
     )
   }, [runtimePhase, runtimeScope])
 
-
   const selectedDrive = draftSettings.selectedDrive
+  const sourceMode = draftSettings.sourceMode
+  const isMappedDriveMode = sourceMode === 'mapped-drive'
+  const isShareFileApiMode = sourceMode === 'sharefile-api'
   const selectableDrives = useMemo(() => {
     const detectedLetters = new Set(driveInfo.candidates.map((candidate) => candidate.letter))
     return driveLetters.map((letter) => ({
@@ -299,6 +386,27 @@ function App() {
   }, [previewPlan])
 
   const driveStatus = useMemo(() => {
+    if (isShareFileApiMode) {
+      if (!draftSettings.shareFileApi.tenantSubdomain) {
+        return { tone: 'neutral', label: 'ShareFile API settings required' as const }
+      }
+
+      if (!shareFileAuthStatus.isAuthenticated) {
+        return { tone: 'offline', label: 'ShareFile API disconnected' as const }
+      }
+
+      if (!draftSettings.shareFileApi.rootItemId) {
+        return { tone: 'neutral', label: 'ShareFile API root not selected' as const }
+      }
+
+      return {
+        tone: 'online',
+        label: draftSettings.shareFileApi.rootDisplayPath
+          ? `API root ${draftSettings.shareFileApi.rootDisplayPath}`
+          : 'ShareFile API connected',
+      }
+    }
+
     if (!selectedDrive) {
       return { tone: 'offline', label: 'Not connected' }
     }
@@ -308,7 +416,15 @@ function App() {
     }
 
     return { tone: 'offline', label: `${selectedDrive}:\\ unavailable` }
-  }, [selectedCandidate, selectedDrive])
+  }, [
+    draftSettings.shareFileApi.rootDisplayPath,
+    draftSettings.shareFileApi.rootItemId,
+    draftSettings.shareFileApi.tenantSubdomain,
+    isShareFileApiMode,
+    selectedCandidate,
+    selectedDrive,
+    shareFileAuthStatus.isAuthenticated,
+  ])
 
   const enabledFolderCount = useMemo(
     () => folderDefinitions.filter((folder) => draftSettings.folders[folder.key]).length,
@@ -319,8 +435,14 @@ function App() {
     !isInitializing &&
     !runState.isRunning &&
     !isPreviewing &&
-    Boolean(selectedDrive) &&
-    driveStatus.tone === 'online'
+    driveStatus.tone === 'online' &&
+    (isMappedDriveMode
+      ? Boolean(selectedDrive)
+      : Boolean(draftSettings.shareFileApi.rootItemId) && shareFileAuthStatus.isAuthenticated)
+
+  const sourceHintText = isShareFileApiMode
+    ? shareFileAuthStatus.message
+    : `${driveInfo.candidates.length} candidate${driveInfo.candidates.length === 1 ? '' : 's'} detected`
 
   const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(draftSettings)
   const visibleTerminalEntries = useMemo(
@@ -469,6 +591,46 @@ function App() {
     }
   }
 
+  const refreshShareFileAuth = async () => {
+    try {
+      const status = await getShareFileAuthStatus()
+      setShareFileAuthStatus(status)
+      return status
+    } catch (error) {
+      const message = getErrorMessage(error, 'Unable to load ShareFile auth status.')
+      setAppError(message)
+      throw error
+    }
+  }
+
+  const loadShareFileFolderNodes = async (parent?: ShareFileBrowseNode | null) => {
+    setIsShareFileBrowseBusy(true)
+    setAppError(null)
+
+    try {
+      const items = parent
+        ? await browseShareFileFolder(parent.id)
+        : await listShareFileRootItems()
+      setShareFileBrowseItems(items)
+      setShareFileBrowsePath((previous) => {
+        if (!parent) {
+          return []
+        }
+
+        const existingIndex = previous.findIndex((node) => node.id === parent.id)
+        if (existingIndex >= 0) {
+          return previous.slice(0, existingIndex + 1)
+        }
+
+        return [...previous, parent]
+      })
+    } catch (error) {
+      setAppError(getErrorMessage(error, 'Unable to browse ShareFile folders.'))
+    } finally {
+      setIsShareFileBrowseBusy(false)
+    }
+  }
+
   const refreshHistory = async () => {
     if (!isDesktopRuntime) {
       return
@@ -506,6 +668,106 @@ function App() {
       ...previous,
       firmwareRetentionEnabled: !previous.firmwareRetentionEnabled,
     }))
+  }
+
+  const handleSourceModeChange = async (nextMode: SourceMode) => {
+    setDraftSettings((previous) => ({
+      ...previous,
+      sourceMode: nextMode,
+    }))
+
+    if (nextMode === 'mapped-drive') {
+      return
+    }
+
+    try {
+      const status = await refreshShareFileAuth()
+      if (status.isAuthenticated) {
+        await loadShareFileFolderNodes(null)
+      }
+    } catch {
+      return
+    }
+  }
+
+  const handleBeginShareFileAuth = async () => {
+    setIsShareFileAuthBusy(true)
+    setAppError(null)
+    setAppNotice(null)
+
+    try {
+      const session = await beginShareFileAuth(shareFileAuthConfig)
+      window.open(session.authUrl, '_blank', 'noopener,noreferrer')
+      setAppNotice('ShareFile sign-in opened in a browser window.')
+    } catch (error) {
+      setAppError(getErrorMessage(error, 'Unable to start ShareFile auth.'))
+    } finally {
+      setIsShareFileAuthBusy(false)
+    }
+  }
+
+  const handleCompleteShareFileAuth = async () => {
+    setIsShareFileAuthBusy(true)
+    setAppError(null)
+    setAppNotice(null)
+
+    try {
+      const status = await completeShareFileAuth(shareFileCallbackUrl)
+      setShareFileAuthStatus(status)
+      setShareFileCallbackUrl('')
+      setDraftSettings((previous) => ({
+        ...previous,
+        shareFileApi: {
+          ...previous.shareFileApi,
+          tenantSubdomain:
+            previous.shareFileApi.tenantSubdomain || status.tenantSubdomain || '',
+        },
+      }))
+      await loadShareFileFolderNodes(null)
+      setAppNotice('ShareFile account connected.')
+    } catch (error) {
+      setAppError(getErrorMessage(error, 'Unable to complete ShareFile auth.'))
+    } finally {
+      setIsShareFileAuthBusy(false)
+    }
+  }
+
+  const handleDisconnectShareFile = async () => {
+    setIsShareFileAuthBusy(true)
+    setAppError(null)
+    setAppNotice(null)
+
+    try {
+      await disconnectShareFileAccount()
+      setShareFileAuthStatus(initialShareFileAuthStatus)
+      setShareFileBrowseItems([])
+      setShareFileBrowsePath([])
+      setDraftSettings((previous) => ({
+        ...previous,
+        shareFileApi: {
+          ...previous.shareFileApi,
+          rootItemId: null,
+          rootDisplayPath: null,
+        },
+      }))
+      setAppNotice('ShareFile account disconnected.')
+    } catch (error) {
+      setAppError(getErrorMessage(error, 'Unable to disconnect the ShareFile account.'))
+    } finally {
+      setIsShareFileAuthBusy(false)
+    }
+  }
+
+  const handleSelectShareFileRoot = (node: ShareFileBrowseNode) => {
+    setDraftSettings((previous) => ({
+      ...previous,
+      shareFileApi: {
+        ...previous.shareFileApi,
+        rootItemId: node.id,
+        rootDisplayPath: node.displayPath,
+      },
+    }))
+    setAppNotice(`Selected ShareFile root ${node.displayPath}.`)
   }
 
   const handlePreview = async () => {
@@ -695,7 +957,7 @@ function App() {
       <main className="content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">ShareFile Connection</p>
+            <p className="eyebrow">ShareFile Source</p>
             <div className="status-row">
               <span className={`status-pill status-pill--${driveStatus.tone}`}>
                 <span className="status-dot" />
@@ -705,37 +967,67 @@ function App() {
                 {runtimePhase === 'running' ? <span className="spinner spinner--inline" /> : <span className="status-dot" />}
                 {runtimeStatusLabel}
               </span>
-              <span className="hint-text">
-                {driveInfo.candidates.length} candidate
-                {driveInfo.candidates.length === 1 ? '' : 's'} detected
-              </span>
+              <span className="hint-text">{sourceHintText}</span>
             </div>
           </div>
 
           <div className="topbar-actions">
             <label className="field">
-              <span>Drive letter</span>
+              <span>Source mode</span>
               <select
-                onChange={(event) =>
-                  setDraftSettings((previous) => ({
-                    ...previous,
-                    selectedDrive: event.target.value || null,
-                  }))
-                }
-                value={draftSettings.selectedDrive ?? ''}
+                onChange={(event) => void handleSourceModeChange(event.target.value as SourceMode)}
+                value={draftSettings.sourceMode}
               >
-                <option value="">Select drive</option>
-                {selectableDrives.map((candidate) => (
-                  <option key={candidate.letter} value={candidate.letter}>
-                    {candidate.letter}:\\ {candidate.isReachable ? 'reachable' : 'manual'}
-                  </option>
-                ))}
+                <option value="mapped-drive">Mapped drive</option>
+                <option value="sharefile-api">ShareFile API</option>
               </select>
             </label>
 
-            <button className="secondary-button" onClick={refreshDriveDetection} type="button">
-              Refresh drives
-            </button>
+            {isMappedDriveMode ? (
+              <>
+                <label className="field">
+                  <span>Drive letter</span>
+                  <select
+                    onChange={(event) =>
+                      setDraftSettings((previous) => ({
+                        ...previous,
+                        selectedDrive: event.target.value || null,
+                      }))
+                    }
+                    value={draftSettings.selectedDrive ?? ''}
+                  >
+                    <option value="">Select drive</option>
+                    {selectableDrives.map((candidate) => (
+                      <option key={candidate.letter} value={candidate.letter}>
+                        {candidate.letter}:\\ {candidate.isReachable ? 'reachable' : 'manual'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button className="secondary-button" onClick={refreshDriveDetection} type="button">
+                  Refresh drives
+                </button>
+              </>
+            ) : (
+              <label className="field">
+                <span>Tenant</span>
+                <input
+                  onChange={(event) =>
+                    setDraftSettings((previous) => ({
+                      ...previous,
+                      shareFileApi: {
+                        ...previous.shareFileApi,
+                        tenantSubdomain: event.target.value,
+                      },
+                    }))
+                  }
+                  placeholder="subdomain"
+                  type="text"
+                  value={draftSettings.shareFileApi.tenantSubdomain}
+                />
+              </label>
+            )}
           </div>
         </header>
 
@@ -751,6 +1043,182 @@ function App() {
 
         {!isInitializing && activeView === 'home' ? (
           <section className="view-grid view-grid--home">
+            {isShareFileApiMode ? (
+              <section className="panel settings-panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">ShareFile API</p>
+                    <h2>Authenticate and choose a remote root</h2>
+                  </div>
+                  <span className={`status-pill status-pill--${shareFileAuthStatus.isAuthenticated ? 'online' : 'offline'}`}>
+                    <span className="status-dot" />
+                    {shareFileAuthStatus.isAuthenticated ? 'Connected' : 'Disconnected'}
+                  </span>
+                </div>
+
+                <div className="topbar-actions">
+                  <label className="field">
+                    <span>Client ID</span>
+                    <input
+                      onChange={(event) =>
+                        setShareFileAuthConfig((previous) => ({
+                          ...previous,
+                          clientId: event.target.value,
+                        }))
+                      }
+                      type="text"
+                      value={shareFileAuthConfig.clientId}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Client secret</span>
+                    <input
+                      onChange={(event) =>
+                        setShareFileAuthConfig((previous) => ({
+                          ...previous,
+                          clientSecret: event.target.value,
+                        }))
+                      }
+                      type="password"
+                      value={shareFileAuthConfig.clientSecret}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Redirect URI</span>
+                    <input
+                      onChange={(event) =>
+                        setShareFileAuthConfig((previous) => ({
+                          ...previous,
+                          redirectUri: event.target.value,
+                        }))
+                      }
+                      type="text"
+                      value={shareFileAuthConfig.redirectUri}
+                    />
+                  </label>
+                </div>
+
+                <div className="topbar-actions">
+                  <label className="field field--wide">
+                    <span>Callback URL</span>
+                    <input
+                      onChange={(event) => setShareFileCallbackUrl(event.target.value)}
+                      placeholder="Paste the full ShareFile callback URL after sign-in"
+                      type="text"
+                      value={shareFileCallbackUrl}
+                    />
+                  </label>
+                </div>
+
+                <div className="history-section history-meta">
+                  <span className="history-chip">
+                    Tenant {(shareFileAuthStatus.tenantSubdomain ?? draftSettings.shareFileApi.tenantSubdomain) || 'n/a'}
+                  </span>
+                  <span className="history-chip">
+                    Refresh token {shareFileAuthStatus.hasRefreshToken ? 'available' : 'missing'}
+                  </span>
+                  <span className="history-chip">
+                    Root {draftSettings.shareFileApi.rootDisplayPath ?? 'not selected'}
+                  </span>
+                </div>
+
+                <div className="action-row">
+                  <button
+                    className="secondary-button"
+                    disabled={isShareFileAuthBusy}
+                    onClick={() => void handleBeginShareFileAuth()}
+                    type="button"
+                  >
+                    {isShareFileAuthBusy ? 'Connecting...' : 'Open ShareFile auth'}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={isShareFileAuthBusy || !shareFileCallbackUrl.trim()}
+                    onClick={() => void handleCompleteShareFileAuth()}
+                    type="button"
+                  >
+                    Complete auth
+                  </button>
+                  <button
+                    className="utility-button"
+                    disabled={!shareFileAuthStatus.isAuthenticated || isShareFileBrowseBusy}
+                    onClick={() => void loadShareFileFolderNodes(null)}
+                    type="button"
+                  >
+                    Browse root
+                  </button>
+                  <button
+                    className="utility-button utility-button--danger"
+                    disabled={!shareFileAuthStatus.isAuthenticated || isShareFileAuthBusy}
+                    onClick={() => void handleDisconnectShareFile()}
+                    type="button"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+
+                <div className="panel-heading">
+                  <div>
+                    <span className="section-kicker">Folder picker</span>
+                    <h2>{shareFileBrowsePath.at(-1)?.displayPath ?? 'ShareFile root folders'}</h2>
+                  </div>
+                  {shareFileBrowsePath.length > 0 ? (
+                    <button
+                      className="utility-button"
+                      onClick={() =>
+                        void loadShareFileFolderNodes(
+                          shareFileBrowsePath.length > 1
+                            ? shareFileBrowsePath[shareFileBrowsePath.length - 2]
+                            : null,
+                        )
+                      }
+                      type="button"
+                    >
+                      Back
+                    </button>
+                  ) : null}
+                </div>
+
+                {isShareFileBrowseBusy ? (
+                  <p className="empty-copy">Loading ShareFile folders...</p>
+                ) : null}
+
+                {!isShareFileBrowseBusy && shareFileBrowseItems.length === 0 ? (
+                  <EmptyState
+                    detail="Connect a ShareFile account and browse a folder to use as the sync root."
+                    title="No ShareFile folders loaded"
+                  />
+                ) : null}
+
+                {!isShareFileBrowseBusy && shareFileBrowseItems.length > 0 ? (
+                  <div className="plan-list">
+                    {shareFileBrowseItems.map((node) => (
+                      <article className="plan-card" key={node.id}>
+                        <strong title={node.displayPath}>{node.name}</strong>
+                        <span>{node.displayPath}</span>
+                        <div className="action-row">
+                          <button
+                            className="utility-button"
+                            onClick={() => handleSelectShareFileRoot(node)}
+                            type="button"
+                          >
+                            Use as root
+                          </button>
+                          <button
+                            className="utility-button"
+                            onClick={() => void loadShareFileFolderNodes(node)}
+                            type="button"
+                          >
+                            Browse
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
             <section className={homePanelClassName}>
               <div className="progress-module-header">
                 <div className="progress-module-copy">
@@ -973,7 +1441,11 @@ function App() {
                   />
                   <StatCard
                     density="compact-meta"
-                    detail={`${previewPlan.selectedDrive}:\\ source`}
+                    detail={
+                      previewPlan.sourceMode === 'mapped-drive'
+                        ? `${previewPlan.selectedDrive ?? 'n/a'}:\\ source`
+                        : previewPlan.sourceRoot
+                    }
                     label="Generated"
                     value={formatTimestamp(previewPlan.generatedAt)}
                   />
@@ -1072,7 +1544,9 @@ function App() {
 
                     <div className="history-section history-meta">
                       <span className="history-chip">
-                        Drive {record.selectedDrive ? `${record.selectedDrive}:\\` : 'n/a'}
+                        {record.sourceMode === 'mapped-drive'
+                          ? `Drive ${record.selectedDrive ? `${record.selectedDrive}:\\` : 'n/a'}`
+                          : `API ${record.sourceRoot ?? 'n/a'}`}
                       </span>
                       <span className="history-chip">
                         {record.enabledFolders.length} folders enabled

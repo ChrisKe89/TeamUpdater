@@ -1,7 +1,11 @@
 use crate::{
+    auth,
     config, detection,
     logger::SessionLogger,
     models::{AppSettings, DetectDrivesResponse, RunAuditRecord, SyncPlan},
+    sharefile_models::{
+        ShareFileAuthConfig, ShareFileAuthSession, ShareFileAuthStatus, ShareFileBrowseNode,
+    },
     sync_engine::{preview_sync, SyncCoordinator},
 };
 use tauri::{AppHandle, Manager, State};
@@ -77,6 +81,66 @@ pub fn request_preview_stop(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn get_sharefile_auth_status() -> Result<ShareFileAuthStatus, String> {
+    auth::get_sharefile_auth_status().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn begin_sharefile_auth(
+    config: ShareFileAuthConfig,
+) -> Result<ShareFileAuthSession, String> {
+    auth::begin_sharefile_auth(config).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn complete_sharefile_auth(callback_url: String) -> Result<ShareFileAuthStatus, String> {
+    auth::complete_sharefile_auth(&callback_url).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_sharefile_root_items() -> Result<Vec<ShareFileBrowseNode>, String> {
+    let client = auth::load_authenticated_client().map_err(|error| error.to_string())?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| error.to_string())?;
+
+    runtime
+        .block_on(async move {
+            let items = client.list_children("home").await?;
+            Ok::<Vec<ShareFileBrowseNode>, crate::sharefile_api::ShareFileApiError>(
+                items
+                    .into_iter()
+                    .filter(|item| item.is_folder())
+                    .map(|item| item.to_browse_node())
+                    .collect(),
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn browse_sharefile_folder(parent_id: String) -> Result<Vec<ShareFileBrowseNode>, String> {
+    let client = auth::load_authenticated_client().map_err(|error| error.to_string())?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|error| error.to_string())?;
+
+    runtime
+        .block_on(async move {
+            let items = client.list_children(&parent_id).await?;
+            Ok::<Vec<ShareFileBrowseNode>, crate::sharefile_api::ShareFileApiError>(
+                items
+                    .into_iter()
+                    .filter(|item| item.is_folder())
+                    .map(|item| item.to_browse_node())
+                    .collect(),
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn disconnect_sharefile_account() -> Result<(), String> {
+    auth::disconnect_sharefile_account().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn quit_app(app: AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<AppState>() {
         state.logger.log("INFO", "Quit requested by operator.");
@@ -128,6 +192,12 @@ pub fn run() {
             start_sync,
             request_sync_stop,
             request_preview_stop,
+            get_sharefile_auth_status,
+            begin_sharefile_auth,
+            complete_sharefile_auth,
+            list_sharefile_root_items,
+            browse_sharefile_folder,
+            disconnect_sharefile_account,
             write_client_log,
             quit_app
         ])

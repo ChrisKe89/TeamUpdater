@@ -16,13 +16,22 @@ const folderDefinitions: FolderDefinition[] = [
   { key: 'TeamWF', label: 'TeamWF', isMandatory: false },
 ]
 
+const defaultDestinationRoot = 'C:\\'
+
 export function getFolderDefinitions() {
   return folderDefinitions
 }
 
 export function buildDefaultSettings(autoSelectedDrive: string | null = null): AppSettings {
   return {
+    sourceMode: 'mapped-drive',
     selectedDrive: autoSelectedDrive,
+    destinationRoot: defaultDestinationRoot,
+    shareFileApi: {
+      tenantSubdomain: '',
+      rootItemId: null,
+      rootDisplayPath: null,
+    },
     firmwareRetentionEnabled: false,
     folders: folderDefinitions.reduce<Record<string, boolean>>((accumulator, folder) => {
       accumulator[folder.key] = folder.isMandatory
@@ -50,7 +59,17 @@ export function mergeSettings(
   }, {})
 
   return {
+    sourceMode: settings?.sourceMode ?? defaults.sourceMode,
     selectedDrive: settings?.selectedDrive ?? defaults.selectedDrive,
+    destinationRoot:
+      typeof settings?.destinationRoot === 'string' && settings.destinationRoot.trim().length > 0
+        ? settings.destinationRoot
+        : defaults.destinationRoot,
+    shareFileApi: {
+      tenantSubdomain: settings?.shareFileApi?.tenantSubdomain?.trim() ?? '',
+      rootItemId: settings?.shareFileApi?.rootItemId ?? null,
+      rootDisplayPath: settings?.shareFileApi?.rootDisplayPath ?? null,
+    },
     firmwareRetentionEnabled:
       settings?.firmwareRetentionEnabled ?? defaults.firmwareRetentionEnabled,
     folders: mergedFolders,

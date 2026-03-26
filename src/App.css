@@ -254,9 +254,22 @@
   font: inherit;
 }
 
+.field input {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  min-width: 180px;
+  outline: none;
+  font: inherit;
+}
+
 .field select option {
   color: #07111f;
   background: #f3f7ff;
+}
+
+.field--wide {
+  width: 100%;
 }
 
 .primary-button,
