@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rust unit tests for the sync planner and CI coverage for `cargo test`.
 - Added a Windows Tauri toolchain preflight script so recurring `link.exe` failures can be diagnosed before starting the desktop app.
 - Added per-session desktop log files under `Logs\` beside the packaged executable, including backend sync traces plus frontend window error and unhandled rejection logging.
+- Added a dedicated runtime hook, extracted screen-level React views, shared panel components, and architecture notes documenting the frontend/backend split.
+- Added frontend tests for runtime helpers, shared panels, the runtime hook, and extracted views.
+- Added a `pnpm test:coverage` workflow with Vitest V8 coverage reporting.
 
 ### Changed
 - Refactored the sync engine so preview planning and execution share the same file comparison logic.
@@ -23,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved the Tauri toolchain doctor to detect Visual Studio Build Tools from both standard install roots and distinguish a missing MSVC linker payload from an uninitialized developer shell.
 - Documented the Visual Studio Build Tools requirement and the `pnpm doctor:tauri` workflow in the README and contributing guide.
 - Added the exact `VsDevCmd.bat -arch=x64 -host_arch=x64` recovery command to the Windows setup and troubleshooting docs for uninitialized PowerShell sessions.
+- Reworked the React app so `App.tsx` is a shell over `useSyncRuntime`, extracted Home/Preview/History/Folder Selection/Firmware Retention views, and centralized runtime selectors away from JSX.
+- Refactored the Rust sync engine into clearer helper boundaries for run finalization, plan building, stale-file handling, and copy/delete execution without changing the Tauri contract.
 
 ## [0.1.0] - 2026-03-17
 

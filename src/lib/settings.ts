@@ -56,3 +56,15 @@ export function mergeSettings(
     folders: mergedFolders,
   }
 }
+
+export function areSettingsEqual(left: AppSettings, right: AppSettings) {
+  if (left.selectedDrive !== right.selectedDrive) {
+    return false
+  }
+
+  if (left.firmwareRetentionEnabled !== right.firmwareRetentionEnabled) {
+    return false
+  }
+
+  return folderDefinitions.every((folder) => left.folders[folder.key] === right.folders[folder.key])
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDefaultSettings, getFolderDefinitions, mergeSettings } from './settings'
+import { areSettingsEqual, buildDefaultSettings, getFolderDefinitions, mergeSettings } from './settings'
 
 describe('settings helpers', () => {
   it('forces mandatory folders on', () => {
@@ -24,5 +24,21 @@ describe('settings helpers', () => {
     const folderKeys = getFolderDefinitions().map((folder) => folder.key)
 
     expect(Object.keys(defaults.folders)).toEqual(folderKeys)
+  })
+
+  it('compares settings without relying on object serialization order', () => {
+    const left = buildDefaultSettings('S')
+    const right = {
+      ...buildDefaultSettings('S'),
+      folders: Object.fromEntries([...Object.entries(left.folders)].reverse()),
+    }
+
+    expect(areSettingsEqual(left, right)).toBe(true)
+    expect(
+      areSettingsEqual(left, {
+        ...right,
+        firmwareRetentionEnabled: true,
+      }),
+    ).toBe(false)
   })
 })

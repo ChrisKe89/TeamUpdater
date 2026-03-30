@@ -56,9 +56,20 @@ pnpm tauri build
 
 ## App structure
 
-- `src/`: React UI, state handling, browser fallback, and tests.
-- `src-tauri/src/`: Rust commands for settings persistence, drive detection, and mirror sync.
+- `src/`: React UI shell, extracted view modules, shared panel components, runtime hook, helper logic, and tests.
+- `src-tauri/src/`: Rust commands for settings persistence, drive detection, sync planning, execution, and run history recording.
 - `bootstrap/`: Deployment script for copying a packaged build into `C:\CUSPAPPS\TeamUpdaterV3\`.
+
+## Frontend and backend flow
+
+- `src/App.tsx` is now a lightweight shell that renders navigation, the top bar, and the active operator view.
+- `src/hooks/useSyncRuntime.ts` owns runtime initialization, Tauri event subscription, preview/sync state transitions, terminal state, and history refresh triggers.
+- `src/views/` contains the Home, Preview, History, Folder Selection, and Firmware Retention screens.
+- `src/components/` contains reusable cards, collapsible sections, terminal panels, nav items, and empty states.
+- `src/lib/runtime.ts` and `src/lib/settings.ts` contain pure selectors, reducers, and settings helpers used by the UI.
+- `src-tauri/src/sync_engine.rs` remains the source of truth for preview planning, execution, cancellation, and run summaries.
+
+See [architecture notes](docs/architecture.md) for the current module split and event flow.
 
 ## Configuration
 
@@ -87,12 +98,12 @@ For the standard bootstrap install, that means:
 ## Packaging and deployment
 
 1. Build the Tauri app with `pnpm tauri build`.
-2. Run the bootstrap script from `bootstrap/Install-TeamUpdaterV3.ps1`.
-3. Point `-BundleSource` at either:
+1. Run the bootstrap script from `bootstrap/Install-TeamUpdaterV3.ps1`.
+1. Point `-BundleSource` at either:
    - the unpacked application directory or executable for copy-based install/upgrade to `C:\CUSPAPPS\TeamUpdaterV3\`
    - the generated NSIS setup executable to run a silent installer flow
-4. Use `-CreateDesktopShortcut` to add a shortcut during copy-based deployment.
-5. Use `-NoLaunch` to suppress automatic startup after installation.
+1. Use `-CreateDesktopShortcut` to add a shortcut during copy-based deployment.
+1. Use `-NoLaunch` to suppress automatic startup after installation.
 
 ## Troubleshooting
 
@@ -117,7 +128,17 @@ For the standard bootstrap install, that means:
 ```powershell
 pnpm lint
 pnpm test -- --run
+pnpm test:coverage
 cd src-tauri; cargo test
 pnpm build
 pnpm tauri build --debug
 ```
+
+Current frontend coverage is reported through Vitest V8 coverage. The current baseline after the refactor is approximately:
+
+- Statements: 51%
+- Branches: 53%
+- Functions: 65%
+- Lines: 51%
+
+This is a reporting baseline, not the final target. Coverage should continue to increase as runtime and view behavior is exercised more directly.
