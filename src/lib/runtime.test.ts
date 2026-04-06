@@ -155,6 +155,38 @@ describe('runtime helpers', () => {
     ])
   })
 
+  it('caps transferLog at 400 entries on file_copied', () => {
+    let state = initialRunState
+    state = { ...state, transferLog: Array.from({ length: 400 }, (_, i) => `C:\\file${i}.txt`) }
+
+    const next = reduceSyncEvent(state, {
+      kind: 'file_copied',
+      destinationPath: 'C:\\overflow.txt',
+      message: 'Copied',
+      totalCopied: 401,
+    })
+
+    expect(next.transferLog).toHaveLength(400)
+    expect(next.transferLog.at(-1)).toBe('C:\\overflow.txt')
+    expect(next.transferLog[0]).toBe('C:\\file1.txt')
+  })
+
+  it('caps deletionLog at 400 entries on file_deleted', () => {
+    let state = initialRunState
+    state = { ...state, deletionLog: Array.from({ length: 400 }, (_, i) => `C:\\file${i}.txt`) }
+
+    const next = reduceSyncEvent(state, {
+      kind: 'file_deleted',
+      destinationPath: 'C:\\overflow.txt',
+      message: 'Deleted',
+      totalDeleted: 401,
+    })
+
+    expect(next.deletionLog).toHaveLength(400)
+    expect(next.deletionLog.at(-1)).toBe('C:\\overflow.txt')
+    expect(next.deletionLog[0]).toBe('C:\\file1.txt')
+  })
+
   it('covers idle drive and summary-derived home counts', () => {
     const previewActions = getPreviewActions(null)
     const driveStatus = getDriveStatus(null, null)
