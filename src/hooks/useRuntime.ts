@@ -9,7 +9,6 @@ import {
   quitApp,
   requestPreviewStop,
   requestSyncStop,
-  saveSettings,
   startPreview,
   startSync,
   writeClientLog,
@@ -333,10 +332,8 @@ export function useRuntime({
       isRunning: true,
       lastMessage: 'Sync queued.',
     })
-    const nextSettings = mergeSettings(draftSettings, autoSelectedDrive)
     try {
-      await saveSettings(nextSettings)
-      await startSync(nextSettings)
+      await startSync(mergeSettings(draftSettings, autoSelectedDrive))
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to start sync.')
       setRuntimePhase('error')

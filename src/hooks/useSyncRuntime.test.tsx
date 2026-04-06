@@ -271,7 +271,7 @@ describe('useSyncRuntime', () => {
       await result.current.handleStartSync()
     })
 
-    expect(desktopMocks.saveSettings).toHaveBeenCalled()
+    expect(desktopMocks.saveSettings).not.toHaveBeenCalled()
     expect(desktopMocks.startSync).toHaveBeenCalled()
     expect(result.current.activeView).toBe('home')
 
