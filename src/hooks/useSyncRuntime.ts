@@ -85,6 +85,7 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
     draftSettings: settings.draftSettings,
     autoSelectedDrive: drive.driveInfo.autoSelected,
     selectedCandidate: drive.selectedCandidate,
+    folderDefinitions,
     onError: setAppError,
     onNotice: setAppNotice,
     hydrateSettings: settings.hydrate,

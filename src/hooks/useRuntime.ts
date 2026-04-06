@@ -49,6 +49,7 @@ export interface UseRuntimeOptions {
   draftSettings: AppSettings
   autoSelectedDrive: string | null
   selectedCandidate: DriveCandidate | null
+  folderDefinitions: FolderDefinition[]
   onError: (message: string | null) => void
   onNotice: (message: string | null) => void
   hydrateSettings: (loadedSettings: AppSettings, autoSelectedDrive: string | null, folderDefinitions: FolderDefinition[]) => void
@@ -60,6 +61,7 @@ export function useRuntime({
   draftSettings,
   autoSelectedDrive,
   selectedCandidate: _selectedCandidate,
+  folderDefinitions,
   onError,
   onNotice,
   hydrateSettings,
@@ -309,7 +311,7 @@ export function useRuntime({
     setPreviewStatusMessage('Preview queued.')
     setTerminalEntries([])
     try {
-      const nextSettings = mergeSettings([], draftSettings, autoSelectedDrive)
+      const nextSettings = mergeSettings(folderDefinitions, draftSettings, autoSelectedDrive)
       setActiveView('preview')
       setPreviewPlan(null)
       await startPreview(nextSettings)
@@ -322,7 +324,7 @@ export function useRuntime({
       setPreviewStatusMessage(message)
       onErrorRef.current(message)
     }
-  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive])
+  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
 
   const handleStopPreview = useCallback(async () => {
     try {
@@ -348,7 +350,7 @@ export function useRuntime({
       lastMessage: 'Sync queued.',
     })
     try {
-      await startSync(mergeSettings([], draftSettings, autoSelectedDrive))
+      await startSync(mergeSettings(folderDefinitions, draftSettings, autoSelectedDrive))
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to start sync.')
       setRuntimePhase('error')
@@ -361,7 +363,7 @@ export function useRuntime({
       }))
       onErrorRef.current(message)
     }
-  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive])
+  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
 
   const handleStopSync = useCallback(async () => {
     try {
