@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import './App.css'
 import { NavButton } from './components/app-panels'
 import { useSyncRuntime } from './hooks/useSyncRuntime'
@@ -10,11 +9,6 @@ import { FirmwareRetentionView } from './views/FirmwareRetentionView'
 
 function App() {
   const runtime = useSyncRuntime()
-  const [isPreviewSummaryOpen, setIsPreviewSummaryOpen] = useState(true)
-  const [isPreviewTerminalOpen, setIsPreviewTerminalOpen] = useState(false)
-  const [isPreviewCopiesOpen, setIsPreviewCopiesOpen] = useState(true)
-  const [isPreviewDeletesOpen, setIsPreviewDeletesOpen] = useState(false)
-  const [isPreviewSkippedOpen, setIsPreviewSkippedOpen] = useState(false)
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -148,22 +142,11 @@ function App() {
         {!runtime.isInitializing && runtime.activeView === 'preview' ? (
           <PreviewView
             canStartSync={runtime.canStartSync}
-            isPreviewCopiesOpen={isPreviewCopiesOpen}
-            isPreviewDeletesOpen={isPreviewDeletesOpen}
             isPreviewing={runtime.isPreviewing}
-            isPreviewSkippedOpen={isPreviewSkippedOpen}
-            isPreviewSummaryOpen={isPreviewSummaryOpen}
-            isPreviewTerminalOpen={isPreviewTerminalOpen}
             onPreview={runtime.handlePreview}
             onRetry={runtime.handleRetryRuntimeAction}
             onStartSync={runtime.handleStartSync}
             onStopPreview={runtime.handleStopPreview}
-            onTogglePreviewCopies={() => setIsPreviewCopiesOpen((previous) => !previous)}
-            onTogglePreviewDeletes={() => setIsPreviewDeletesOpen((previous) => !previous)}
-            onTogglePreviewSkipped={() => setIsPreviewSkippedOpen((previous) => !previous)}
-            onTogglePreviewSummary={() => setIsPreviewSummaryOpen((previous) => !previous)}
-            onTogglePreviewTerminal={() => setIsPreviewTerminalOpen((previous) => !previous)}
-            onViewLogs={() => setIsPreviewTerminalOpen(true)}
             previewActions={runtime.previewActions}
             previewCopyDetail={runtime.previewCopyDetail}
             previewPlan={runtime.previewPlan}

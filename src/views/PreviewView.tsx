@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   CollapseButton,
   EmptyState,
@@ -11,21 +12,10 @@ import type { SyncPlan, TerminalEntry } from '../types'
 export interface PreviewViewProps {
   canStartSync: boolean
   isPreviewing: boolean
-  isPreviewSummaryOpen: boolean
-  isPreviewTerminalOpen: boolean
-  isPreviewCopiesOpen: boolean
-  isPreviewDeletesOpen: boolean
-  isPreviewSkippedOpen: boolean
   onPreview: () => Promise<void>
   onRetry: () => Promise<void>
   onStartSync: () => Promise<void>
   onStopPreview: () => Promise<void>
-  onTogglePreviewSummary: () => void
-  onTogglePreviewTerminal: () => void
-  onTogglePreviewCopies: () => void
-  onTogglePreviewDeletes: () => void
-  onTogglePreviewSkipped: () => void
-  onViewLogs: () => void
   previewActions: {
     copies: SyncPlan['actions']
     deletes: SyncPlan['actions']
@@ -43,22 +33,11 @@ export interface PreviewViewProps {
 
 export function PreviewView({
   canStartSync,
-  isPreviewCopiesOpen,
-  isPreviewDeletesOpen,
   isPreviewing,
-  isPreviewSkippedOpen,
-  isPreviewSummaryOpen,
-  isPreviewTerminalOpen,
   onPreview,
   onRetry,
   onStartSync,
   onStopPreview,
-  onTogglePreviewCopies,
-  onTogglePreviewDeletes,
-  onTogglePreviewSkipped,
-  onTogglePreviewSummary,
-  onTogglePreviewTerminal,
-  onViewLogs,
   previewActions,
   previewCopyDetail,
   previewPlan,
@@ -69,6 +48,12 @@ export function PreviewView({
   runtimeScope,
   runtimeStatusLabel,
 }: PreviewViewProps) {
+  const [isPreviewSummaryOpen, setIsPreviewSummaryOpen] = useState(true)   // starts open
+  const [isPreviewTerminalOpen, setIsPreviewTerminalOpen] = useState(false)
+  const [isPreviewCopiesOpen, setIsPreviewCopiesOpen] = useState(true)     // starts open
+  const [isPreviewDeletesOpen, setIsPreviewDeletesOpen] = useState(false)
+  const [isPreviewSkippedOpen, setIsPreviewSkippedOpen] = useState(false)
+
   return (
     <section className="settings-panel">
       <section
@@ -129,14 +114,14 @@ export function PreviewView({
                 >
                   Retry
                 </button>
-                <button className="utility-button" onClick={onViewLogs} type="button">
+                <button className="utility-button" onClick={() => setIsPreviewTerminalOpen(true)} type="button">
                   View logs
                 </button>
               </>
             ) : null}
             <CollapseButton
               isOpen={isPreviewSummaryOpen}
-              onToggle={onTogglePreviewSummary}
+              onToggle={() => setIsPreviewSummaryOpen((previous) => !previous)}
               title="Toggle preview summary"
             />
           </div>
@@ -188,7 +173,7 @@ export function PreviewView({
         isCollapsible
         isOpen={isPreviewTerminalOpen}
         onCancel={isPreviewing ? () => void onStopPreview() : undefined}
-        onToggle={onTogglePreviewTerminal}
+        onToggle={() => setIsPreviewTerminalOpen((previous) => !previous)}
         status={previewStatusMessage}
         title="Preview terminal"
       />
@@ -202,7 +187,7 @@ export function PreviewView({
             emptyDetail="The source and destination already match for copy actions."
             emptyTitle="No files to copy"
             isOpen={isPreviewCopiesOpen}
-            onToggle={onTogglePreviewCopies}
+            onToggle={() => setIsPreviewCopiesOpen((previous) => !previous)}
             title="Files to copy"
           />
           <PlanPanel
@@ -212,7 +197,7 @@ export function PreviewView({
             emptyDetail="No local files are queued for deletion in this preview."
             emptyTitle="No files to delete"
             isOpen={isPreviewDeletesOpen}
-            onToggle={onTogglePreviewDeletes}
+            onToggle={() => setIsPreviewDeletesOpen((previous) => !previous)}
             title="Files to delete"
           />
           <PlanPanel
@@ -222,7 +207,7 @@ export function PreviewView({
             emptyDetail="Firmware retention is not skipping any deletes in this preview."
             emptyTitle="No skipped deletes"
             isOpen={isPreviewSkippedOpen}
-            onToggle={onTogglePreviewSkipped}
+            onToggle={() => setIsPreviewSkippedOpen((previous) => !previous)}
             title="Skipped deletes"
           />
         </section>

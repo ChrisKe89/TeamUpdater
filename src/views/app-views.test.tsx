@@ -237,22 +237,11 @@ describe('extracted views', () => {
     render(
       <PreviewView
         canStartSync
-        isPreviewCopiesOpen
-        isPreviewDeletesOpen={false}
         isPreviewing={false}
-        isPreviewSkippedOpen={false}
-        isPreviewSummaryOpen
-        isPreviewTerminalOpen={false}
         onPreview={async () => undefined}
         onRetry={async () => undefined}
         onStartSync={async () => undefined}
         onStopPreview={async () => undefined}
-        onTogglePreviewCopies={() => undefined}
-        onTogglePreviewDeletes={() => undefined}
-        onTogglePreviewSkipped={() => undefined}
-        onTogglePreviewSummary={() => undefined}
-        onTogglePreviewTerminal={() => undefined}
-        onViewLogs={() => undefined}
         previewActions={{
           copies: previewPlan.actions,
           deletes: [],
@@ -278,22 +267,11 @@ describe('extracted views', () => {
     const { rerender } = render(
       <PreviewView
         canStartSync
-        isPreviewCopiesOpen
-        isPreviewDeletesOpen={false}
         isPreviewing={false}
-        isPreviewSkippedOpen={false}
-        isPreviewSummaryOpen
-        isPreviewTerminalOpen={false}
         onPreview={async () => undefined}
         onRetry={async () => undefined}
         onStartSync={async () => undefined}
         onStopPreview={async () => undefined}
-        onTogglePreviewCopies={() => undefined}
-        onTogglePreviewDeletes={() => undefined}
-        onTogglePreviewSkipped={() => undefined}
-        onTogglePreviewSummary={() => undefined}
-        onTogglePreviewTerminal={() => undefined}
-        onViewLogs={() => undefined}
         previewActions={{
           copies: [],
           deletes: [],
@@ -315,22 +293,11 @@ describe('extracted views', () => {
     rerender(
       <PreviewView
         canStartSync
-        isPreviewCopiesOpen
-        isPreviewDeletesOpen
         isPreviewing
-        isPreviewSkippedOpen
-        isPreviewSummaryOpen
-        isPreviewTerminalOpen
         onPreview={async () => undefined}
         onRetry={async () => undefined}
         onStartSync={async () => undefined}
         onStopPreview={async () => undefined}
-        onTogglePreviewCopies={() => undefined}
-        onTogglePreviewDeletes={() => undefined}
-        onTogglePreviewSkipped={() => undefined}
-        onTogglePreviewSummary={() => undefined}
-        onTogglePreviewTerminal={() => undefined}
-        onViewLogs={() => undefined}
         previewActions={{
           copies: [],
           deletes: [],
@@ -354,22 +321,11 @@ describe('extracted views', () => {
     rerender(
       <PreviewView
         canStartSync
-        isPreviewCopiesOpen
-        isPreviewDeletesOpen={false}
         isPreviewing={false}
-        isPreviewSkippedOpen={false}
-        isPreviewSummaryOpen
-        isPreviewTerminalOpen={false}
         onPreview={async () => undefined}
         onRetry={async () => undefined}
         onStartSync={async () => undefined}
         onStopPreview={async () => undefined}
-        onTogglePreviewCopies={() => undefined}
-        onTogglePreviewDeletes={() => undefined}
-        onTogglePreviewSkipped={() => undefined}
-        onTogglePreviewSummary={() => undefined}
-        onTogglePreviewTerminal={() => undefined}
-        onViewLogs={() => undefined}
         previewActions={{
           copies: [],
           deletes: [],
@@ -548,32 +504,15 @@ describe('extracted views', () => {
     const onStartSync = vi.fn(async () => undefined)
     const onStopPreview = vi.fn(async () => undefined)
     const onRetry = vi.fn(async () => undefined)
-    const onViewLogs = vi.fn()
-    const onTogglePreviewSummary = vi.fn()
-    const onTogglePreviewTerminal = vi.fn()
-    const onTogglePreviewCopies = vi.fn()
-    const onTogglePreviewDeletes = vi.fn()
-    const onTogglePreviewSkipped = vi.fn()
 
     const { rerender } = render(
       <PreviewView
         canStartSync
-        isPreviewCopiesOpen
-        isPreviewDeletesOpen
         isPreviewing={false}
-        isPreviewSkippedOpen
-        isPreviewSummaryOpen
-        isPreviewTerminalOpen={false}
         onPreview={onPreview}
         onRetry={onRetry}
         onStartSync={onStartSync}
         onStopPreview={onStopPreview}
-        onTogglePreviewCopies={onTogglePreviewCopies}
-        onTogglePreviewDeletes={onTogglePreviewDeletes}
-        onTogglePreviewSkipped={onTogglePreviewSkipped}
-        onTogglePreviewSummary={onTogglePreviewSummary}
-        onTogglePreviewTerminal={onTogglePreviewTerminal}
-        onViewLogs={onViewLogs}
         previewActions={{
           copies: previewPlan.actions,
           deletes: [],
@@ -599,22 +538,11 @@ describe('extracted views', () => {
     rerender(
       <PreviewView
         canStartSync
-        isPreviewCopiesOpen
-        isPreviewDeletesOpen
         isPreviewing
-        isPreviewSkippedOpen
-        isPreviewSummaryOpen
-        isPreviewTerminalOpen
         onPreview={onPreview}
         onRetry={onRetry}
         onStartSync={onStartSync}
         onStopPreview={onStopPreview}
-        onTogglePreviewCopies={onTogglePreviewCopies}
-        onTogglePreviewDeletes={onTogglePreviewDeletes}
-        onTogglePreviewSkipped={onTogglePreviewSkipped}
-        onTogglePreviewSummary={onTogglePreviewSummary}
-        onTogglePreviewTerminal={onTogglePreviewTerminal}
-        onViewLogs={onViewLogs}
         previewActions={{
           copies: previewPlan.actions,
           deletes: [],
@@ -639,31 +567,15 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Toggle Skipped deletes' }))
 
     expect(onStopPreview).toHaveBeenCalled()
-    expect(onTogglePreviewSummary).toHaveBeenCalled()
-    expect(onTogglePreviewTerminal).toHaveBeenCalled()
-    expect(onTogglePreviewCopies).toHaveBeenCalled()
-    expect(onTogglePreviewDeletes).toHaveBeenCalled()
-    expect(onTogglePreviewSkipped).toHaveBeenCalled()
 
     rerender(
       <PreviewView
         canStartSync
-        isPreviewCopiesOpen={false}
-        isPreviewDeletesOpen={false}
         isPreviewing={false}
-        isPreviewSkippedOpen={false}
-        isPreviewSummaryOpen
-        isPreviewTerminalOpen={false}
         onPreview={onPreview}
         onRetry={onRetry}
         onStartSync={onStartSync}
         onStopPreview={onStopPreview}
-        onTogglePreviewCopies={onTogglePreviewCopies}
-        onTogglePreviewDeletes={onTogglePreviewDeletes}
-        onTogglePreviewSkipped={onTogglePreviewSkipped}
-        onTogglePreviewSummary={onTogglePreviewSummary}
-        onTogglePreviewTerminal={onTogglePreviewTerminal}
-        onViewLogs={onViewLogs}
         previewActions={{
           copies: [],
           deletes: [],
@@ -684,7 +596,6 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View logs' }))
 
     expect(onRetry).toHaveBeenCalled()
-    expect(onViewLogs).toHaveBeenCalled()
   })
 
   it('renders history loading and empty states and refresh action', () => {
