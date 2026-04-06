@@ -169,7 +169,7 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
     } catch (error) {
       setAppError(getErrorMessage(error, 'Unable to detect ShareFile drives.'))
     }
-  }, [selectedDriveValue, driveInitialize, setSelectedDrive, setAppError])
+  }, [selectedDriveValue, driveInitialize, setSelectedDrive])
 
   return {
     // Settings

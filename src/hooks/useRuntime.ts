@@ -120,6 +120,11 @@ export function useRuntime({
     hydrateSettingsRef.current = hydrateSettings
   }, [hydrateSettings])
 
+  const initializeDrivesRef = useRef(initializeDrives)
+  useEffect(() => {
+    initializeDrivesRef.current = initializeDrives
+  }, [initializeDrives])
+
   useEffect(() => {
     let cancelled = false
 
@@ -134,7 +139,7 @@ export function useRuntime({
         if (cancelled) return
         onFolderDefinitionsLoadedRef.current(loadedFolderDefs)
         hydrateSettingsRef.current(loadedSettings, detectedDrives.autoSelected, loadedFolderDefs)
-        initializeDrives(detectedDrives)
+        initializeDrivesRef.current(detectedDrives)
         setHistoryRecords(loadedHistory)
       } catch (error) {
         if (!cancelled) {
