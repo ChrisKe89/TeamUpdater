@@ -156,14 +156,9 @@ export function getDriveStatus(
 
 export function getScopedTerminalEntries(
   terminalEntries: TerminalEntry[],
-  activeTerminalScope: SyncEventScope | null,
   scope: SyncEventScope,
 ) {
-  const visibleEntries = activeTerminalScope
-    ? terminalEntries.filter((entry) => entry.scope === activeTerminalScope)
-    : terminalEntries
-
-  return visibleEntries.filter((entry) => entry.scope === scope)
+  return terminalEntries.filter((entry) => entry.scope === scope)
 }
 
 export function getTransferFeedItems(

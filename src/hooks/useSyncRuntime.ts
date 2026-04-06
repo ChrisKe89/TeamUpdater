@@ -45,7 +45,6 @@ import type {
   NavView,
   RunAuditRecord,
   SyncEvent,
-  SyncEventScope,
   SyncPlan,
   SyncRunState,
   TerminalEntry,
@@ -139,7 +138,6 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [previewStatusMessage, setPreviewStatusMessage] = useState('Ready to generate a preview.')
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([])
-  const [activeTerminalScope, setActiveTerminalScope] = useState<SyncEventScope | null>(null)
   const [runtimePhase, setRuntimePhase] = useState<RuntimePhase>('idle')
   const [runtimeScope, setRuntimeScope] = useState<RuntimeScope>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
@@ -225,7 +223,6 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
               setRuntimePhase('running')
               setRuntimeScope('preview')
               setRuntimeError(null)
-              setActiveTerminalScope('preview')
               setPreviewStatusMessage(payload.message)
               setTerminalEntries([])
               return
@@ -254,7 +251,6 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
               return
             case 'log_line':
               setTerminalEntries((previous) => appendTerminalEntry(previous, payload))
-              setActiveTerminalScope(payload.scope)
               return
             default:
               setRunState((previous) => reduceSyncEvent(previous, payload))
@@ -263,7 +259,6 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
                 setRuntimePhase('running')
                 setRuntimeScope('sync')
                 setRuntimeError(null)
-                setActiveTerminalScope('sync')
                 setTerminalEntries([])
               }
 
@@ -385,12 +380,12 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
     [draftSettings, settings],
   )
   const syncTerminalEntries = useMemo(
-    () => getScopedTerminalEntries(terminalEntries, activeTerminalScope, 'sync'),
-    [activeTerminalScope, terminalEntries],
+    () => getScopedTerminalEntries(terminalEntries, 'sync'),
+    [terminalEntries],
   )
   const previewTerminalEntries = useMemo(
-    () => getScopedTerminalEntries(terminalEntries, activeTerminalScope, 'preview'),
-    [activeTerminalScope, terminalEntries],
+    () => getScopedTerminalEntries(terminalEntries, 'preview'),
+    [terminalEntries],
   )
   const transferFeedItems = useMemo(
     () => getTransferFeedItems(runState.transferLog, syncTerminalEntries),
@@ -492,7 +487,6 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
     setAppError(null)
     setAppNotice(null)
     setPreviewStatusMessage('Preview queued.')
-    setActiveTerminalScope('preview')
     setTerminalEntries([])
 
     try {
@@ -529,7 +523,6 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
     setRuntimeError(null)
     setAppError(null)
     setAppNotice(null)
-    setActiveTerminalScope('sync')
     setTerminalEntries([])
     setPreviewStatusMessage('Ready to generate a preview.')
     setActiveView('home')

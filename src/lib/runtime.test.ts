@@ -6,6 +6,7 @@ import {
   getDriveStatus,
   getHomeCounts,
   getPreviewActions,
+  getScopedTerminalEntries,
   getTransferFeedItems,
   initialRunState,
   reduceSyncEvent,
@@ -136,6 +137,22 @@ describe('runtime helpers', () => {
     expect(transferFeedItems).toEqual(['C:\\A.txt', 'Copying C:\\A.txt'])
     expect(cleanupFeedItems).toEqual(['C:\\B.txt', 'Removing C:\\B.txt', 'Removed C:\\B.txt'])
     expect(homeCounts.map((item) => item.value)).toEqual(['3', '1', '1'])
+  })
+
+  it('getScopedTerminalEntries returns entries matching the requested scope only', () => {
+    const entries: TerminalEntry[] = [
+      { line: 'sync line', scope: 'sync', timestamp: '1' },
+      { line: 'preview line', scope: 'preview', timestamp: '2' },
+      { line: 'sync line 2', scope: 'sync', timestamp: '3' },
+    ]
+
+    expect(getScopedTerminalEntries(entries, 'sync')).toEqual([
+      { line: 'sync line', scope: 'sync', timestamp: '1' },
+      { line: 'sync line 2', scope: 'sync', timestamp: '3' },
+    ])
+    expect(getScopedTerminalEntries(entries, 'preview')).toEqual([
+      { line: 'preview line', scope: 'preview', timestamp: '2' },
+    ])
   })
 
   it('covers idle drive and summary-derived home counts', () => {
