@@ -7,6 +7,7 @@ import type { AppSettings, FolderDefinition } from '../types'
 export interface UseSettingsOptions {
   onError: (message: string | null) => void
   onNotice: (message: string | null) => void
+  folderDefinitions: FolderDefinition[]
 }
 
 export interface UseSettingsResult {
@@ -14,7 +15,7 @@ export interface UseSettingsResult {
   draftSettings: AppSettings
   isSaving: boolean
   hasUnsavedChanges: boolean
-  hydrate: (loadedSettings: AppSettings, autoSelectedDrive: string | null) => void
+  hydrate: (loadedSettings: AppSettings, autoSelectedDrive: string | null, folderDefinitions: FolderDefinition[]) => void
   persistSettings: (nextSettings: AppSettings) => Promise<void>
   handleResetSettings: () => void
   handleFolderToggle: (folder: FolderDefinition) => void
@@ -22,18 +23,22 @@ export interface UseSettingsResult {
   setSelectedDrive: (drive: string | null) => void
 }
 
-export function useSettings({ onError, onNotice }: UseSettingsOptions): UseSettingsResult {
-  const [settings, setSettings] = useState<AppSettings>(buildDefaultSettings())
-  const [draftSettings, setDraftSettings] = useState<AppSettings>(buildDefaultSettings())
+export function useSettings({ onError, onNotice, folderDefinitions }: UseSettingsOptions): UseSettingsResult {
+  const [settings, setSettings] = useState<AppSettings>(buildDefaultSettings(folderDefinitions))
+  const [draftSettings, setDraftSettings] = useState<AppSettings>(buildDefaultSettings(folderDefinitions))
   const [isSaving, setIsSaving] = useState(false)
 
   const hasUnsavedChanges = useMemo(
-    () => !areSettingsEqual(settings, draftSettings),
-    [settings, draftSettings],
+    () => !areSettingsEqual(folderDefinitions, settings, draftSettings),
+    [folderDefinitions, settings, draftSettings],
   )
 
-  const hydrate = (loadedSettings: AppSettings, autoSelectedDrive: string | null) => {
-    const merged = mergeSettings(loadedSettings, autoSelectedDrive)
+  const hydrate = (
+    loadedSettings: AppSettings,
+    autoSelectedDrive: string | null,
+    folderDefinitions: FolderDefinition[],
+  ) => {
+    const merged = mergeSettings(folderDefinitions, loadedSettings, autoSelectedDrive)
     setSettings(merged)
     setDraftSettings(merged)
   }

@@ -1,14 +1,12 @@
 // src/hooks/useSyncRuntime.ts
 import { useCallback, useEffect, useState } from 'react'
 import { detectShareFileDrives, writeClientLog } from '../lib/desktop'
-import { getFolderDefinitions, mergeSettings } from '../lib/settings'
+import { mergeSettings } from '../lib/settings'
 import type { AppSettings, FolderDefinition, NavView, RunAuditRecord, SyncPlan, SyncRunState, TerminalEntry } from '../types'
 import type { RuntimePhase, RuntimeScope } from '../lib/runtime'
 import { useDriveDetection } from './useDriveDetection'
 import { useRuntime } from './useRuntime'
 import { useSettings } from './useSettings'
-
-const folderDefinitions = getFolderDefinitions()
 
 export interface SyncRuntimeState {
   activeView: NavView
@@ -79,8 +77,9 @@ export interface SyncRuntimeActions {
 export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
   const [appError, setAppError] = useState<string | null>(null)
   const [appNotice, setAppNotice] = useState<string | null>(null)
+  const [folderDefinitions, setFolderDefinitions] = useState<FolderDefinition[]>([])
 
-  const settings = useSettings({ onError: setAppError, onNotice: setAppNotice })
+  const settings = useSettings({ onError: setAppError, onNotice: setAppNotice, folderDefinitions })
   const drive = useDriveDetection({ selectedDrive: settings.draftSettings.selectedDrive })
   const runtime = useRuntime({
     draftSettings: settings.draftSettings,
@@ -90,6 +89,7 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
     onNotice: setAppNotice,
     hydrateSettings: settings.hydrate,
     initializeDrives: drive.initialize,
+    onFolderDefinitionsLoaded: setFolderDefinitions,
   })
 
   // Auto-dismiss notices
@@ -151,8 +151,8 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
   const autoSelected = drive.driveInfo.autoSelected
 
   const handleApplySettings = useCallback(async () => {
-    await persistSettings(mergeSettings(draftSettingsValue, autoSelected))
-  }, [persistSettings, draftSettingsValue, autoSelected])
+    await persistSettings(mergeSettings(folderDefinitions, draftSettingsValue, autoSelected))
+  }, [persistSettings, folderDefinitions, draftSettingsValue, autoSelected])
 
   const selectedDriveValue = settings.draftSettings.selectedDrive
   const driveInitialize = drive.initialize

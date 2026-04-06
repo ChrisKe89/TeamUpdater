@@ -5,6 +5,7 @@ import type { RunAuditRecord, SyncEvent } from '../types'
 
 const desktopMocks = vi.hoisted(() => ({
   detectShareFileDrives: vi.fn(),
+  getFolderDefinitions: vi.fn(),
   loadRunHistory: vi.fn(),
   loadSettings: vi.fn(),
   quitApp: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('../lib/desktop', () => ({
   detectShareFileDrives: desktopMocks.detectShareFileDrives,
+  getFolderDefinitions: desktopMocks.getFolderDefinitions,
   isDesktopRuntime: true,
   loadRunHistory: desktopMocks.loadRunHistory,
   loadSettings: desktopMocks.loadSettings,
@@ -61,8 +63,10 @@ const completedRun: RunAuditRecord = {
 }
 
 describe('useSyncRuntime', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    const { getFolderDefinitions: getStaticDefs } = await import('../lib/settings')
+    desktopMocks.getFolderDefinitions.mockResolvedValue(getStaticDefs())
     eventMocks.listen.mockImplementation(
       async (...args: [string, (event: { payload: SyncEvent }) => void]) => {
         const callback = args[1]

@@ -91,6 +91,17 @@ pub fn write_client_log(
     Ok(())
 }
 
+#[tauri::command]
+pub fn get_folder_definitions() -> Vec<crate::models::FolderDefinition> {
+    crate::models::FOLDER_DEFINITIONS
+        .iter()
+        .map(|(key, mandatory)| crate::models::FolderDefinition {
+            key: key.to_string(),
+            is_mandatory: *mandatory,
+        })
+        .collect()
+}
+
 pub fn run() {
     let logger = SessionLogger::new();
     logger.log("INFO", "Initializing TeamUpdater V3.");
@@ -107,6 +118,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             detect_sharefile_drives,
+            get_folder_definitions,
             load_settings,
             save_settings,
             start_preview,

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
   detectShareFileDrives,
+  getFolderDefinitions,
   isDesktopRuntime,
   loadRunHistory,
   loadSettings,
@@ -35,6 +36,7 @@ import type {
   AppSettings,
   DetectDrivesResponse,
   DriveCandidate,
+  FolderDefinition,
   NavView,
   RunAuditRecord,
   SyncEvent,
@@ -49,8 +51,9 @@ export interface UseRuntimeOptions {
   selectedCandidate: DriveCandidate | null
   onError: (message: string | null) => void
   onNotice: (message: string | null) => void
-  hydrateSettings: (loadedSettings: AppSettings, autoSelectedDrive: string | null) => void
+  hydrateSettings: (loadedSettings: AppSettings, autoSelectedDrive: string | null, folderDefinitions: FolderDefinition[]) => void
   initializeDrives: (detected: DetectDrivesResponse) => void
+  onFolderDefinitionsLoaded: (defs: FolderDefinition[]) => void
 }
 
 export function useRuntime({
@@ -61,6 +64,7 @@ export function useRuntime({
   onNotice,
   hydrateSettings,
   initializeDrives,
+  onFolderDefinitionsLoaded,
 }: UseRuntimeOptions) {
   const [activeView, setActiveView] = useState<NavView>('home')
   const [runState, setRunState] = useState<SyncRunState>(initialRunState)
@@ -104,18 +108,30 @@ export function useRuntime({
     refreshHistoryRef.current = refreshHistory
   }, [refreshHistory])
 
+  const onFolderDefinitionsLoadedRef = useRef(onFolderDefinitionsLoaded)
+  useEffect(() => {
+    onFolderDefinitionsLoadedRef.current = onFolderDefinitionsLoaded
+  }, [onFolderDefinitionsLoaded])
+
+  const hydrateSettingsRef = useRef(hydrateSettings)
+  useEffect(() => {
+    hydrateSettingsRef.current = hydrateSettings
+  }, [hydrateSettings])
+
   useEffect(() => {
     let cancelled = false
 
     const init = async () => {
       try {
-        const [loadedSettings, detectedDrives, loadedHistory] = await Promise.all([
+        const [loadedSettings, detectedDrives, loadedHistory, loadedFolderDefs] = await Promise.all([
           loadSettings(),
           detectShareFileDrives(),
           loadRunHistory(),
+          getFolderDefinitions(),
         ])
         if (cancelled) return
-        hydrateSettings(loadedSettings, detectedDrives.autoSelected)
+        onFolderDefinitionsLoadedRef.current(loadedFolderDefs)
+        hydrateSettingsRef.current(loadedSettings, detectedDrives.autoSelected, loadedFolderDefs)
         initializeDrives(detectedDrives)
         setHistoryRecords(loadedHistory)
       } catch (error) {
@@ -293,7 +309,7 @@ export function useRuntime({
     setPreviewStatusMessage('Preview queued.')
     setTerminalEntries([])
     try {
-      const nextSettings = mergeSettings(draftSettings, autoSelectedDrive)
+      const nextSettings = mergeSettings([], draftSettings, autoSelectedDrive)
       setActiveView('preview')
       setPreviewPlan(null)
       await startPreview(nextSettings)
@@ -332,7 +348,7 @@ export function useRuntime({
       lastMessage: 'Sync queued.',
     })
     try {
-      await startSync(mergeSettings(draftSettings, autoSelectedDrive))
+      await startSync(mergeSettings([], draftSettings, autoSelectedDrive))
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to start sync.')
       setRuntimePhase('error')

@@ -390,7 +390,7 @@ describe('extracted views', () => {
     render(
       <FolderSelectionView
         appNotice="Settings saved."
-        draftSettings={buildDefaultSettings('S')}
+        draftSettings={buildDefaultSettings(getFolderDefinitions(), 'S')}
         enabledFolderCount={2}
         folderDefinitions={getFolderDefinitions()}
         hasUnsavedChanges

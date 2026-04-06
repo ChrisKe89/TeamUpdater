@@ -20,7 +20,10 @@ export function getFolderDefinitions() {
   return folderDefinitions
 }
 
-export function buildDefaultSettings(autoSelectedDrive: string | null = null): AppSettings {
+export function buildDefaultSettings(
+  folderDefinitions: FolderDefinition[],
+  autoSelectedDrive: string | null = null,
+): AppSettings {
   return {
     selectedDrive: autoSelectedDrive,
     firmwareRetentionEnabled: false,
@@ -33,10 +36,11 @@ export function buildDefaultSettings(autoSelectedDrive: string | null = null): A
 }
 
 export function mergeSettings(
+  folderDefinitions: FolderDefinition[],
   settings: Partial<AppSettings> | null | undefined,
   autoSelectedDrive: string | null = null,
 ): AppSettings {
-  const defaults = buildDefaultSettings(autoSelectedDrive)
+  const defaults = buildDefaultSettings(folderDefinitions, autoSelectedDrive)
   const incomingFolders = settings?.folders ?? {}
 
   const mergedFolders = folderDefinitions.reduce<Record<string, boolean>>((accumulator, folder) => {
@@ -59,7 +63,11 @@ export function mergeSettings(
   }
 }
 
-export function areSettingsEqual(left: AppSettings, right: AppSettings) {
+export function areSettingsEqual(
+  folderDefinitions: FolderDefinition[],
+  left: AppSettings,
+  right: AppSettings,
+) {
   if (left.selectedDrive !== right.selectedDrive) {
     return false
   }

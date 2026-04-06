@@ -19,6 +19,13 @@ pub const FOLDER_DEFINITIONS: [(&str, bool); 13] = [
     ("TeamWF", false),
 ];
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderDefinition {
+    pub key: String,
+    pub is_mandatory: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {

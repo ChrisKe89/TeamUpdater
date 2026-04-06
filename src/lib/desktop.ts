@@ -1,11 +1,21 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AppSettings, DetectDrivesResponse, RunAuditRecord } from '../types'
+import type { AppSettings, DetectDrivesResponse, FolderDefinition, RunAuditRecord } from '../types'
 import { buildDefaultSettings, mergeSettings } from './settings'
 
 export const isDesktopRuntime =
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 const browserStorageKey = 'teamupdater-v3-settings'
+
+export async function getFolderDefinitions(): Promise<FolderDefinition[]> {
+  if (isDesktopRuntime) {
+    const defs = await invoke<{ key: string; isMandatory: boolean }[]>('get_folder_definitions')
+    return defs.map((def) => ({ key: def.key, label: def.key, isMandatory: def.isMandatory }))
+  }
+  // Browser fallback: use static list
+  const { getFolderDefinitions: getStatic } = await import('./settings')
+  return getStatic()
+}
 
 export async function detectShareFileDrives(): Promise<DetectDrivesResponse> {
   if (isDesktopRuntime) {
@@ -26,13 +36,16 @@ export async function loadSettings(): Promise<AppSettings> {
   const rawSettings = window.localStorage.getItem(browserStorageKey)
 
   if (!rawSettings) {
-    return buildDefaultSettings()
+    const { getFolderDefinitions: getStatic } = await import('./settings')
+    return buildDefaultSettings(getStatic())
   }
 
   try {
-    return mergeSettings(JSON.parse(rawSettings) as Partial<AppSettings>)
+    const { getFolderDefinitions: getStatic } = await import('./settings')
+    return mergeSettings(getStatic(), JSON.parse(rawSettings) as Partial<AppSettings>)
   } catch {
-    return buildDefaultSettings()
+    const { getFolderDefinitions: getStatic } = await import('./settings')
+    return buildDefaultSettings(getStatic())
   }
 }
 
