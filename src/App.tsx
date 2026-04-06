@@ -78,11 +78,17 @@ function App() {
                 value={runtime.draftSettings.selectedDrive ?? ''}
               >
                 <option value="">Select drive</option>
-                {runtime.selectableDrives.map((candidate) => (
-                  <option key={candidate.letter} value={candidate.letter}>
-                    {candidate.letter}:\\ {candidate.isReachable ? 'reachable' : 'manual'}
+                {runtime.selectableDrives.length === 0 ? (
+                  <option disabled value="">
+                    No drives detected — click Refresh
                   </option>
-                ))}
+                ) : (
+                  runtime.selectableDrives.map((candidate) => (
+                    <option key={candidate.letter} value={candidate.letter}>
+                      {candidate.letter}:\\ {candidate.isReachable ? 'reachable' : 'manual'}
+                    </option>
+                  ))
+                )}
               </select>
             </label>
 
