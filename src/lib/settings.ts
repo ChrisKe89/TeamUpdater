@@ -28,6 +28,7 @@ export function buildDefaultSettings(autoSelectedDrive: string | null = null): A
       accumulator[folder.key] = folder.isMandatory
       return accumulator
     }, {}),
+    destinationRoot: null,
   }
 }
 
@@ -54,6 +55,7 @@ export function mergeSettings(
     firmwareRetentionEnabled:
       settings?.firmwareRetentionEnabled ?? defaults.firmwareRetentionEnabled,
     folders: mergedFolders,
+    destinationRoot: settings?.destinationRoot ?? null,
   }
 }
 

@@ -189,6 +189,7 @@ struct RunAuditContext {
     selected_drive: Option<String>,
     source_root: Option<String>,
     started_at: String,
+    destination_root: String,
 }
 
 fn run_sync(
@@ -292,9 +293,13 @@ fn run_sync(
         }
     }
 
+    let destination_root = settings
+        .destination_root
+        .as_deref()
+        .unwrap_or(DESTINATION_ROOT);
     for folder in enabled_folders(settings) {
         ensure_not_stopped(stop_requested)?;
-        cleanup_empty_dirs(&PathBuf::from(DESTINATION_ROOT).join(folder))?;
+        cleanup_empty_dirs(&PathBuf::from(destination_root).join(folder))?;
     }
 
     summary.copied_bytes_label = format_bytes(copied_bytes);
@@ -335,11 +340,16 @@ fn build_plan_for_job(
         .ok_or(SyncError::MissingDrive)?;
     let source_root = detection::build_source_root(&selected_drive);
 
+    let destination_root = normalized
+        .destination_root
+        .as_deref()
+        .unwrap_or(DESTINATION_ROOT);
+
     build_sync_plan_with_roots(
         &normalized,
         &selected_drive,
         &source_root,
-        Path::new(r"C:\"),
+        Path::new(destination_root),
         stop_requested,
         event_target,
     )
@@ -494,6 +504,10 @@ fn build_run_audit_context(settings: &AppSettings) -> RunAuditContext {
             .as_ref()
             .map(|drive| detection::build_source_root(drive).display().to_string()),
         started_at: timestamp_now_ms(),
+        destination_root: settings
+            .destination_root
+            .clone()
+            .unwrap_or_else(|| DESTINATION_ROOT.to_string()),
     }
 }
 
@@ -552,7 +566,7 @@ fn build_run_audit_record(
         status,
         selected_drive: audit_context.selected_drive.clone(),
         source_root: audit_context.source_root.clone(),
-        destination_root: DESTINATION_ROOT.to_string(),
+        destination_root: audit_context.destination_root.clone(),
         enabled_folders: audit_context.enabled_folders.clone(),
         firmware_retention_enabled: audit_context.firmware_retention_enabled,
         summary,

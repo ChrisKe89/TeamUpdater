@@ -10,6 +10,7 @@ export interface AppSettings {
   selectedDrive: string | null
   firmwareRetentionEnabled: boolean
   folders: Record<string, boolean>
+  destinationRoot?: string | null
 }
 
 export interface DriveCandidate {

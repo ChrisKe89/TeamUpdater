@@ -25,6 +25,8 @@ pub struct AppSettings {
     pub selected_drive: Option<String>,
     pub firmware_retention_enabled: bool,
     pub folders: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub destination_root: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -40,6 +42,7 @@ impl Default for AppSettings {
             selected_drive: None,
             firmware_retention_enabled: false,
             folders,
+            destination_root: None,
         }
     }
 }
