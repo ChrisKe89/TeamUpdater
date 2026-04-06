@@ -1,5 +1,5 @@
 // src/hooks/useRuntime.ts
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
   detectShareFileDrives,
@@ -89,6 +89,11 @@ export function useRuntime({
       setIsHistoryLoading(false)
     }
   }, [onError])
+
+  const refreshHistoryRef = useRef(refreshHistory)
+  useEffect(() => {
+    refreshHistoryRef.current = refreshHistory
+  }, [refreshHistory])
 
   useEffect(() => {
     let cancelled = false
@@ -180,7 +185,7 @@ export function useRuntime({
                 payload.kind === 'run_stopped' ||
                 payload.kind === 'run_failed'
               ) {
-                void refreshHistory()
+                void refreshHistoryRef.current()
               }
           }
         })
@@ -192,7 +197,6 @@ export function useRuntime({
       cancelled = true
       void unlistenPromise.then((unlisten) => unlisten())
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -269,7 +273,7 @@ export function useRuntime({
   )
 
   // Actions
-  const handlePreview = async () => {
+  const handlePreview = useCallback(async () => {
     if (runState.isRunning || isPreviewing) return
     setIsPreviewing(true)
     setRuntimePhase('running')
@@ -293,17 +297,17 @@ export function useRuntime({
       setPreviewStatusMessage(message)
       onError(message)
     }
-  }
+  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, onError, onNotice])
 
-  const handleStopPreview = async () => {
+  const handleStopPreview = useCallback(async () => {
     try {
       await requestPreviewStop()
     } catch (error) {
       onError(getErrorMessage(error, 'Unable to request preview stop.'))
     }
-  }
+  }, [onError])
 
-  const handleStartSync = async () => {
+  const handleStartSync = useCallback(async () => {
     if (runState.isRunning || isPreviewing) return
     setRuntimePhase('running')
     setRuntimeScope('sync')
@@ -332,44 +336,48 @@ export function useRuntime({
       }))
       onError(message)
     }
-  }
+  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, onError, onNotice])
 
-  const handleStopSync = async () => {
+  const handleStopSync = useCallback(async () => {
     try {
       await requestSyncStop()
     } catch (error) {
       onError(getErrorMessage(error, 'Unable to request stop.'))
     }
-  }
+  }, [onError])
 
-  const handleQuit = async () => {
+  const handleQuit = useCallback(async () => {
     if (runState.isRunning || isPreviewing) {
       const shouldQuit = window.confirm('A preview or sync is currently running. Quit the app anyway?')
       if (!shouldQuit) return
     }
-    await quitApp()
-  }
+    try {
+      await quitApp()
+    } catch (error) {
+      onError(getErrorMessage(error, 'Unable to quit.'))
+    }
+  }, [runState.isRunning, isPreviewing, onError])
 
-  const handleRetryRuntimeAction = async () => {
+  const handleRetryRuntimeAction = useCallback(async () => {
     if (runtimeScope === 'preview') {
       await handlePreview()
       return
     }
     await handleStartSync()
-  }
+  }, [runtimeScope, handlePreview, handleStartSync])
 
-  const navigateToHistory = () => {
+  const navigateToHistory = useCallback(() => {
     setActiveView('history')
     void refreshHistory()
-  }
+  }, [refreshHistory])
 
-  const handleViewResults = () => {
+  const handleViewResults = useCallback(() => {
     if (previewPlan) {
       setActiveView('preview')
       return
     }
     navigateToHistory()
-  }
+  }, [previewPlan, navigateToHistory])
 
   return {
     activeView,
