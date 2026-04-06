@@ -9,6 +9,7 @@ import {
   quitApp,
   requestPreviewStop,
   requestSyncStop,
+  saveSettings,
   startPreview,
   startSync,
   writeClientLog,
@@ -76,19 +77,29 @@ export function useRuntime({
   const [runtimeScope, setRuntimeScope] = useState<RuntimeScope>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
 
+  const onErrorRef = useRef(onError)
+  useEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
+
+  const onNoticeRef = useRef(onNotice)
+  useEffect(() => {
+    onNoticeRef.current = onNotice
+  }, [onNotice])
+
   const refreshHistory = useCallback(async () => {
     if (!isDesktopRuntime) return
     setIsHistoryLoading(true)
-    onError(null)
+    onErrorRef.current(null)
     try {
       const records = await loadRunHistory()
       setHistoryRecords(records)
     } catch (error) {
-      onError(getErrorMessage(error, 'Unable to load run history.'))
+      onErrorRef.current(getErrorMessage(error, 'Unable to load run history.'))
     } finally {
       setIsHistoryLoading(false)
     }
-  }, [onError])
+  }, [])
 
   const refreshHistoryRef = useRef(refreshHistory)
   useEffect(() => {
@@ -111,7 +122,7 @@ export function useRuntime({
         setHistoryRecords(loadedHistory)
       } catch (error) {
         if (!cancelled) {
-          onError(getErrorMessage(error, 'Unable to initialise the app.'))
+          onErrorRef.current(getErrorMessage(error, 'Unable to initialise the app.'))
         }
       } finally {
         if (!cancelled) {
@@ -156,7 +167,7 @@ export function useRuntime({
               setRuntimeScope('preview')
               setRuntimeError(payload.message)
               setPreviewStatusMessage(payload.message)
-              onError(payload.message)
+              onErrorRef.current(payload.message)
               return
             case 'log_line':
               setTerminalEntries((previous) => appendTerminalEntry(previous, payload))
@@ -178,7 +189,7 @@ export function useRuntime({
                 setRuntimePhase('error')
                 setRuntimeScope('sync')
                 setRuntimeError(payload.message)
-                onError(payload.message)
+                onErrorRef.current(payload.message)
               }
               if (
                 payload.kind === 'run_completed' ||
@@ -279,8 +290,8 @@ export function useRuntime({
     setRuntimePhase('running')
     setRuntimeScope('preview')
     setRuntimeError(null)
-    onError(null)
-    onNotice(null)
+    onErrorRef.current(null)
+    onNoticeRef.current(null)
     setPreviewStatusMessage('Preview queued.')
     setTerminalEntries([])
     try {
@@ -295,25 +306,25 @@ export function useRuntime({
       setRuntimeScope('preview')
       setRuntimeError(message)
       setPreviewStatusMessage(message)
-      onError(message)
+      onErrorRef.current(message)
     }
-  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, onError, onNotice])
+  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive])
 
   const handleStopPreview = useCallback(async () => {
     try {
       await requestPreviewStop()
     } catch (error) {
-      onError(getErrorMessage(error, 'Unable to request preview stop.'))
+      onErrorRef.current(getErrorMessage(error, 'Unable to request preview stop.'))
     }
-  }, [onError])
+  }, [])
 
   const handleStartSync = useCallback(async () => {
     if (runState.isRunning || isPreviewing) return
     setRuntimePhase('running')
     setRuntimeScope('sync')
     setRuntimeError(null)
-    onError(null)
-    onNotice(null)
+    onErrorRef.current(null)
+    onNoticeRef.current(null)
     setTerminalEntries([])
     setPreviewStatusMessage('Ready to generate a preview.')
     setActiveView('home')
@@ -322,8 +333,10 @@ export function useRuntime({
       isRunning: true,
       lastMessage: 'Sync queued.',
     })
+    const nextSettings = mergeSettings(draftSettings, autoSelectedDrive)
     try {
-      await startSync(mergeSettings(draftSettings, autoSelectedDrive))
+      await saveSettings(nextSettings)
+      await startSync(nextSettings)
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to start sync.')
       setRuntimePhase('error')
@@ -334,17 +347,17 @@ export function useRuntime({
         isRunning: false,
         lastMessage: message,
       }))
-      onError(message)
+      onErrorRef.current(message)
     }
-  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, onError, onNotice])
+  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive])
 
   const handleStopSync = useCallback(async () => {
     try {
       await requestSyncStop()
     } catch (error) {
-      onError(getErrorMessage(error, 'Unable to request stop.'))
+      onErrorRef.current(getErrorMessage(error, 'Unable to request stop.'))
     }
-  }, [onError])
+  }, [])
 
   const handleQuit = useCallback(async () => {
     if (runState.isRunning || isPreviewing) {
@@ -354,9 +367,9 @@ export function useRuntime({
     try {
       await quitApp()
     } catch (error) {
-      onError(getErrorMessage(error, 'Unable to quit.'))
+      onErrorRef.current(getErrorMessage(error, 'Unable to quit.'))
     }
-  }, [runState.isRunning, isPreviewing, onError])
+  }, [runState.isRunning, isPreviewing])
 
   const handleRetryRuntimeAction = useCallback(async () => {
     if (runtimeScope === 'preview') {
