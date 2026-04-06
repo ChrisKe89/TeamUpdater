@@ -7,8 +7,7 @@ import {
   loadRunHistory,
   loadSettings,
   quitApp,
-  requestPreviewStop,
-  requestSyncStop,
+  requestStop,
   startPreview,
   startSync,
   writeClientLog,
@@ -311,7 +310,7 @@ export function useRuntime({
 
   const handleStopPreview = useCallback(async () => {
     try {
-      await requestPreviewStop()
+      await requestStop()
     } catch (error) {
       onErrorRef.current(getErrorMessage(error, 'Unable to request preview stop.'))
     }
@@ -350,7 +349,7 @@ export function useRuntime({
 
   const handleStopSync = useCallback(async () => {
     try {
-      await requestSyncStop()
+      await requestStop()
     } catch (error) {
       onErrorRef.current(getErrorMessage(error, 'Unable to request stop.'))
     }

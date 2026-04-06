@@ -32,10 +32,6 @@ pub struct SyncCoordinator {
     worker: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
-pub fn preview_sync(settings: AppSettings) -> Result<SyncPlan, SyncError> {
-    build_plan_for_job(&settings, &AtomicBool::new(false), None)
-}
-
 impl SyncCoordinator {
     pub fn start_preview(&self, app: AppHandle, settings: AppSettings) -> Result<(), SyncError> {
         self.start_worker(move |stop_requested| {

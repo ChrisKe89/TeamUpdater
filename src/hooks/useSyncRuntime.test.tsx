@@ -8,8 +8,7 @@ const desktopMocks = vi.hoisted(() => ({
   loadRunHistory: vi.fn(),
   loadSettings: vi.fn(),
   quitApp: vi.fn(),
-  requestPreviewStop: vi.fn(),
-  requestSyncStop: vi.fn(),
+  requestStop: vi.fn(),
   saveSettings: vi.fn(),
   startPreview: vi.fn(),
   startSync: vi.fn(),
@@ -31,8 +30,7 @@ vi.mock('../lib/desktop', () => ({
   loadRunHistory: desktopMocks.loadRunHistory,
   loadSettings: desktopMocks.loadSettings,
   quitApp: desktopMocks.quitApp,
-  requestPreviewStop: desktopMocks.requestPreviewStop,
-  requestSyncStop: desktopMocks.requestSyncStop,
+  requestStop: desktopMocks.requestStop,
   saveSettings: desktopMocks.saveSettings,
   startPreview: desktopMocks.startPreview,
   startSync: desktopMocks.startSync,
@@ -115,8 +113,7 @@ describe('useSyncRuntime', () => {
 
   it('persists settings, resets drafts, and reports command failures', async () => {
     desktopMocks.saveSettings.mockResolvedValue(undefined)
-    desktopMocks.requestPreviewStop.mockRejectedValue(new Error('preview stop failed'))
-    desktopMocks.requestSyncStop.mockRejectedValue(new Error('sync stop failed'))
+    desktopMocks.requestStop.mockRejectedValue(new Error('stop failed'))
     desktopMocks.quitApp.mockResolvedValue(undefined)
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -156,7 +153,7 @@ describe('useSyncRuntime', () => {
       await result.current.handleStopPreview()
     })
 
-    expect(result.current.appError).toBe('preview stop failed')
+    expect(result.current.appError).toBe('stop failed')
 
     act(() => {
       eventMocks.emitSyncEvent({
@@ -169,7 +166,7 @@ describe('useSyncRuntime', () => {
       await result.current.handleStopSync()
     })
 
-    expect(result.current.appError).toBe('sync stop failed')
+    expect(result.current.appError).toBe('stop failed')
 
     await act(async () => {
       await result.current.handleQuit()

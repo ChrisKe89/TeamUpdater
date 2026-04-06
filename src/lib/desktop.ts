@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AppSettings, DetectDrivesResponse, RunAuditRecord, SyncPlan } from '../types'
+import type { AppSettings, DetectDrivesResponse, RunAuditRecord } from '../types'
 import { buildDefaultSettings, mergeSettings } from './settings'
 
 export const isDesktopRuntime =
@@ -44,14 +44,6 @@ export async function saveSettings(settings: AppSettings) {
   window.localStorage.setItem(browserStorageKey, JSON.stringify(settings))
 }
 
-export async function previewSyncPlan(settings: AppSettings): Promise<SyncPlan> {
-  if (!isDesktopRuntime) {
-    throw new Error('Preview is only available in the Tauri desktop runtime.')
-  }
-
-  return invoke<SyncPlan>('preview_sync_plan', { settings })
-}
-
 export async function startPreview(settings: AppSettings) {
   if (!isDesktopRuntime) {
     throw new Error('Preview is only available in the Tauri desktop runtime.')
@@ -76,20 +68,12 @@ export async function startSync(settings: AppSettings) {
   return invoke<void>('start_sync', { settings })
 }
 
-export async function requestSyncStop() {
+export async function requestStop() {
   if (!isDesktopRuntime) {
     throw new Error('Stop requests are only available in the Tauri desktop runtime.')
   }
 
-  return invoke<void>('request_sync_stop')
-}
-
-export async function requestPreviewStop() {
-  if (!isDesktopRuntime) {
-    throw new Error('Stop requests are only available in the Tauri desktop runtime.')
-  }
-
-  return invoke<void>('request_preview_stop')
+  return invoke<void>('request_stop')
 }
 
 export async function writeClientLog(level: string, message: string) {

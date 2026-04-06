@@ -1,8 +1,8 @@
 use crate::{
     config, detection,
     logger::SessionLogger,
-    models::{AppSettings, DetectDrivesResponse, RunAuditRecord, SyncPlan},
-    sync_engine::{preview_sync, SyncCoordinator},
+    models::{AppSettings, DetectDrivesResponse, RunAuditRecord},
+    sync_engine::SyncCoordinator,
 };
 use tauri::{AppHandle, Manager, State};
 
@@ -24,11 +24,6 @@ pub fn load_settings(app: AppHandle) -> Result<AppSettings, String> {
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     config::save_settings(&app, &settings).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn preview_sync_plan(settings: AppSettings) -> Result<SyncPlan, String> {
-    preview_sync(settings).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -61,15 +56,7 @@ pub fn start_sync(
 }
 
 #[tauri::command]
-pub fn request_sync_stop(state: State<'_, AppState>) -> Result<(), String> {
-    state
-        .coordinator
-        .request_stop()
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn request_preview_stop(state: State<'_, AppState>) -> Result<(), String> {
+pub fn request_stop(state: State<'_, AppState>) -> Result<(), String> {
     state
         .coordinator
         .request_stop()
@@ -122,12 +109,10 @@ pub fn run() {
             detect_sharefile_drives,
             load_settings,
             save_settings,
-            preview_sync_plan,
             start_preview,
             load_run_history,
             start_sync,
-            request_sync_stop,
-            request_preview_stop,
+            request_stop,
             write_client_log,
             quit_app
         ])
