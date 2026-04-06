@@ -43,14 +43,14 @@ export function reduceSyncEvent(previous: SyncRunState, event: SyncEvent): SyncR
       return {
         ...previous,
         copiedCount: event.totalCopied,
-        transferLog: [...previous.transferLog, event.destinationPath].slice(-400),
+        transferLog: [...previous.transferLog, event.destinationPath].slice(-TERMINAL_LOG_LIMIT),
         lastMessage: event.message,
       }
     case 'file_deleted':
       return {
         ...previous,
         deletedCount: event.totalDeleted,
-        deletionLog: [...previous.deletionLog, event.destinationPath].slice(-400),
+        deletionLog: [...previous.deletionLog, event.destinationPath].slice(-TERMINAL_LOG_LIMIT),
         lastMessage: event.message,
       }
     case 'run_completed':
