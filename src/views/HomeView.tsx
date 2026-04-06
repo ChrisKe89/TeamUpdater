@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CollapsibleLogPanel, ProgressBar, TerminalPanel } from '../components/app-panels'
 import { formatProgress } from '../lib/runtime'
 
@@ -8,18 +9,11 @@ export interface HomeViewProps {
   deletedCount: number
   homeCounts: { label: string; value: string }[]
   homePanelClassName: string
-  isHomeTerminalOpen: boolean
-  isTransferFeedOpen: boolean
-  isCleanupFeedOpen: boolean
   isPreviewing: boolean
   onPreview: () => Promise<void>
   onRetry: () => Promise<void>
   onStartSync: () => Promise<void>
   onStop: () => Promise<void>
-  onToggleCleanupFeed: () => void
-  onToggleHomeTerminal: () => void
-  onToggleTransferFeed: () => void
-  onViewLogs: () => void
   onViewResults: () => void
   processedCount: number
   processedTotal: number
@@ -49,18 +43,11 @@ export function HomeView({
   deletedCount,
   homeCounts,
   homePanelClassName,
-  isCleanupFeedOpen,
-  isHomeTerminalOpen,
   isPreviewing,
-  isTransferFeedOpen,
   onPreview,
   onRetry,
   onStartSync,
   onStop,
-  onToggleCleanupFeed,
-  onToggleHomeTerminal,
-  onToggleTransferFeed,
-  onViewLogs,
   onViewResults,
   previewStatusMessage,
   processedCount,
@@ -77,6 +64,12 @@ export function HomeView({
   syncTerminalEntries,
   transferFeedItems,
 }: HomeViewProps) {
+  const [isHomeTerminalOpen, setIsHomeTerminalOpen] = useState(false)
+  const [isTransferFeedOpen, setIsTransferFeedOpen] = useState(false)
+  const [isCleanupFeedOpen, setIsCleanupFeedOpen] = useState(false)
+  const homeTerminalOpen = isHomeTerminalOpen || runtimePhase === 'running'
+  const transferFeedOpen = isTransferFeedOpen && transferFeedItems.length > 0
+  const cleanupFeedOpen = isCleanupFeedOpen && cleanupFeedItems.length > 0
   return (
     <section className="view-grid view-grid--home">
       <section className={homePanelClassName}>
@@ -195,7 +188,7 @@ export function HomeView({
               >
                 Retry
               </button>
-              <button className="utility-button" onClick={onViewLogs} type="button">
+              <button className="utility-button" onClick={() => setIsHomeTerminalOpen(true)} type="button">
                 View logs
               </button>
             </>
@@ -211,9 +204,9 @@ export function HomeView({
       <TerminalPanel
         entries={syncTerminalEntries}
         isCollapsible
-        isOpen={isHomeTerminalOpen}
+        isOpen={homeTerminalOpen}
         onCancel={runState.isRunning ? () => void onStop() : undefined}
-        onToggle={onToggleHomeTerminal}
+        onToggle={() => setIsHomeTerminalOpen((previous) => !previous)}
         status={runState.lastMessage}
         title="Execution terminal"
       />
@@ -223,9 +216,9 @@ export function HomeView({
         emptyDetail="Run preview or update to populate this list."
         emptyTitle="No files copied yet"
         eyebrow="Transfer Feed"
-        isOpen={isTransferFeedOpen}
+        isOpen={transferFeedOpen}
         items={transferFeedItems}
-        onToggle={onToggleTransferFeed}
+        onToggle={() => setIsTransferFeedOpen((previous) => !previous)}
         title="New files"
       />
 
@@ -234,9 +227,9 @@ export function HomeView({
         emptyDetail="Cleanup activity will appear here during update runs."
         emptyTitle="No files removed yet"
         eyebrow="Cleanup Feed"
-        isOpen={isCleanupFeedOpen}
+        isOpen={cleanupFeedOpen}
         items={cleanupFeedItems}
-        onToggle={onToggleCleanupFeed}
+        onToggle={() => setIsCleanupFeedOpen((previous) => !previous)}
         title="Removed files"
       />
     </section>

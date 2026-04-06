@@ -10,18 +10,11 @@ import { FirmwareRetentionView } from './views/FirmwareRetentionView'
 
 function App() {
   const runtime = useSyncRuntime()
-  const [isTransferFeedOpen, setIsTransferFeedOpen] = useState(false)
-  const [isCleanupFeedOpen, setIsCleanupFeedOpen] = useState(false)
-  const [isHomeTerminalOpen, setIsHomeTerminalOpen] = useState(false)
   const [isPreviewSummaryOpen, setIsPreviewSummaryOpen] = useState(true)
   const [isPreviewTerminalOpen, setIsPreviewTerminalOpen] = useState(false)
   const [isPreviewCopiesOpen, setIsPreviewCopiesOpen] = useState(true)
   const [isPreviewDeletesOpen, setIsPreviewDeletesOpen] = useState(false)
   const [isPreviewSkippedOpen, setIsPreviewSkippedOpen] = useState(false)
-  const homeTerminalOpen = isHomeTerminalOpen || runtime.runtimePhase === 'running'
-  const transferFeedOpen = isTransferFeedOpen && runtime.transferFeedItems.length > 0
-  const cleanupFeedOpen = isCleanupFeedOpen && runtime.cleanupFeedItems.length > 0
-
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -129,18 +122,11 @@ function App() {
             deletedCount={runtime.runState.deletedCount}
             homeCounts={runtime.homeCounts}
             homePanelClassName={runtime.homePanelClassName}
-            isCleanupFeedOpen={cleanupFeedOpen}
-            isHomeTerminalOpen={homeTerminalOpen}
             isPreviewing={runtime.isPreviewing}
-            isTransferFeedOpen={transferFeedOpen}
             onPreview={runtime.handlePreview}
             onRetry={runtime.handleRetryRuntimeAction}
             onStartSync={runtime.handleStartSync}
             onStop={runtime.runtimeScope === 'preview' ? runtime.handleStopPreview : runtime.handleStopSync}
-            onToggleCleanupFeed={() => setIsCleanupFeedOpen((previous) => !previous)}
-            onToggleHomeTerminal={() => setIsHomeTerminalOpen((previous) => !previous)}
-            onToggleTransferFeed={() => setIsTransferFeedOpen((previous) => !previous)}
-            onViewLogs={() => setIsHomeTerminalOpen(true)}
             onViewResults={runtime.handleViewResults}
             previewStatusMessage={runtime.previewStatusMessage}
             processedCount={runtime.processedCount}

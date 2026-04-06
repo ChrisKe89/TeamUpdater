@@ -47,18 +47,11 @@ describe('extracted views', () => {
           { label: 'Planned deletes', value: '0' },
         ]}
         homePanelClassName="panel highlight-panel runtime-panel"
-        isCleanupFeedOpen={false}
-        isHomeTerminalOpen={false}
         isPreviewing={false}
-        isTransferFeedOpen={false}
         onPreview={async () => undefined}
         onRetry={async () => undefined}
         onStartSync={async () => undefined}
         onStop={async () => undefined}
-        onToggleCleanupFeed={() => undefined}
-        onToggleHomeTerminal={() => undefined}
-        onToggleTransferFeed={() => undefined}
-        onViewLogs={() => undefined}
         onViewResults={() => undefined}
         previewStatusMessage="Ready to generate a preview."
         processedCount={0}
@@ -102,18 +95,11 @@ describe('extracted views', () => {
           { label: 'Planned deletes', value: '2' },
         ]}
         homePanelClassName="panel highlight-panel runtime-panel runtime-panel--running"
-        isCleanupFeedOpen
-        isHomeTerminalOpen
         isPreviewing={false}
-        isTransferFeedOpen
         onPreview={async () => undefined}
         onRetry={async () => undefined}
         onStartSync={async () => undefined}
         onStop={onStop}
-        onToggleCleanupFeed={() => undefined}
-        onToggleHomeTerminal={() => undefined}
-        onToggleTransferFeed={() => undefined}
-        onViewLogs={() => undefined}
         onViewResults={() => undefined}
         previewStatusMessage="Preview ready."
         processedCount={2}
@@ -149,7 +135,6 @@ describe('extracted views', () => {
 
   it('renders the home view with completion and error actions', () => {
     const onRetry = vi.fn(async () => undefined)
-    const onViewLogs = vi.fn()
     const onViewResults = vi.fn()
     const { rerender } = render(
       <HomeView
@@ -163,18 +148,11 @@ describe('extracted views', () => {
           { label: 'Planned deletes', value: '1' },
         ]}
         homePanelClassName="panel highlight-panel runtime-panel runtime-panel--completed"
-        isCleanupFeedOpen={false}
-        isHomeTerminalOpen={false}
         isPreviewing={false}
-        isTransferFeedOpen={false}
         onPreview={async () => undefined}
         onRetry={onRetry}
         onStartSync={async () => undefined}
         onStop={async () => undefined}
-        onToggleCleanupFeed={() => undefined}
-        onToggleHomeTerminal={() => undefined}
-        onToggleTransferFeed={() => undefined}
-        onViewLogs={onViewLogs}
         onViewResults={onViewResults}
         previewStatusMessage="Preview scan completed."
         processedCount={4}
@@ -217,18 +195,11 @@ describe('extracted views', () => {
           { label: 'Planned deletes', value: '0' },
         ]}
         homePanelClassName="panel highlight-panel runtime-panel runtime-panel--error"
-        isCleanupFeedOpen={false}
-        isHomeTerminalOpen={false}
         isPreviewing={false}
-        isTransferFeedOpen={false}
         onPreview={async () => undefined}
         onRetry={onRetry}
         onStartSync={async () => undefined}
         onStop={async () => undefined}
-        onToggleCleanupFeed={() => undefined}
-        onToggleHomeTerminal={() => undefined}
-        onToggleTransferFeed={() => undefined}
-        onViewLogs={onViewLogs}
         onViewResults={onViewResults}
         previewStatusMessage="Preview scan completed."
         processedCount={0}
@@ -260,7 +231,6 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View logs' }))
 
     expect(onRetry).toHaveBeenCalled()
-    expect(onViewLogs).toHaveBeenCalled()
   })
 
   it('renders the preview view with planned actions', () => {
@@ -518,9 +488,6 @@ describe('extracted views', () => {
   it('wires home view actions and collapsible sections', () => {
     const onPreview = vi.fn(async () => undefined)
     const onStartSync = vi.fn(async () => undefined)
-    const onToggleHomeTerminal = vi.fn()
-    const onToggleTransferFeed = vi.fn()
-    const onToggleCleanupFeed = vi.fn()
 
     render(
       <HomeView
@@ -534,18 +501,11 @@ describe('extracted views', () => {
           { label: 'Planned deletes', value: '0' },
         ]}
         homePanelClassName="panel highlight-panel runtime-panel"
-        isCleanupFeedOpen={false}
-        isHomeTerminalOpen={false}
         isPreviewing
-        isTransferFeedOpen={false}
         onPreview={onPreview}
         onRetry={async () => undefined}
         onStartSync={onStartSync}
         onStop={async () => undefined}
-        onToggleCleanupFeed={onToggleCleanupFeed}
-        onToggleHomeTerminal={onToggleHomeTerminal}
-        onToggleTransferFeed={onToggleTransferFeed}
-        onViewLogs={() => undefined}
         onViewResults={() => undefined}
         previewStatusMessage="Scanning folders."
         processedCount={0}
@@ -581,9 +541,6 @@ describe('extracted views', () => {
 
     expect(onPreview).toHaveBeenCalled()
     expect(onStartSync).toHaveBeenCalled()
-    expect(onToggleHomeTerminal).toHaveBeenCalled()
-    expect(onToggleTransferFeed).toHaveBeenCalled()
-    expect(onToggleCleanupFeed).toHaveBeenCalled()
   })
 
   it('wires preview view actions, panels, and terminal controls', () => {
