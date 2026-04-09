@@ -25,8 +25,6 @@ import {
   getRuntimeStatusLabel,
   getScopedTerminalEntries,
   getTransferFeedItems,
-  type RuntimePhase,
-  type RuntimeScope,
 } from '../lib/runtime'
 import { initialRuntimeState, runtimeReducer } from '../lib/runtime-reducer'
 import { getErrorMessage } from '../lib/errors'

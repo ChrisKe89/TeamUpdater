@@ -4,12 +4,12 @@ import { useSyncRuntimeContext } from '../context/SyncRuntimeContext'
 import { formatProgress } from '../lib/runtime'
 
 export function HomeView({
-  isConsoleStatusCollapsed,
-  setIsConsoleStatusCollapsed,
+  isConsoleStatusCollapsed = false,
+  setIsConsoleStatusCollapsed = () => undefined,
 }: {
-  isConsoleStatusCollapsed: boolean
-  setIsConsoleStatusCollapsed: (value: boolean | ((prev: boolean) => boolean)) => void
-}) {
+  isConsoleStatusCollapsed?: boolean
+  setIsConsoleStatusCollapsed?: (value: boolean | ((prev: boolean) => boolean)) => void
+} = {}) {
   const {
     canStartSync,
     cleanupFeedItems,
