@@ -1,14 +1,17 @@
+import { useState } from 'react'
 import './App.css'
 import { NavButton } from './components/app-panels'
-import { useSyncRuntime } from './hooks/useSyncRuntime'
+import { SyncRuntimeProvider, useSyncRuntimeContext } from './context/SyncRuntimeContext'
+import { FirmwareRetentionView } from './views/FirmwareRetentionView'
+import { FolderSelectionView } from './views/FolderSelectionView'
+import { HistoryView } from './views/HistoryView'
 import { HomeView } from './views/HomeView'
 import { PreviewView } from './views/PreviewView'
-import { HistoryView } from './views/HistoryView'
-import { FolderSelectionView } from './views/FolderSelectionView'
-import { FirmwareRetentionView } from './views/FirmwareRetentionView'
 
-function App() {
-  const runtime = useSyncRuntime()
+function AppContent() {
+  const runtime = useSyncRuntimeContext()
+  const [isConsoleStatusCollapsed, setIsConsoleStatusCollapsed] = useState(false)
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -16,7 +19,6 @@ function App() {
           <div>
             <h1>TeamUpdater V3</h1>
           </div>
-
           <nav className="nav">
             <NavButton
               active={runtime.activeView === 'home'}
@@ -45,67 +47,24 @@ function App() {
             />
           </nav>
         </div>
-
         <div className="sidebar-footer">
-          <button className="utility-button utility-button--ghost sidebar-quit" onClick={() => void runtime.handleQuit()} type="button">
+          <button
+            className="utility-button utility-button--ghost sidebar-quit"
+            onClick={() => void runtime.handleQuit()}
+            type="button"
+          >
             Quit
           </button>
         </div>
       </aside>
 
       <main className="content">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Console Status</p>
-            <h2>ShareFile operator console</h2>
-            <div className="status-row">
-              <span className={`status-pill status-pill--${runtime.driveStatus.tone}`}>
-                <span className="status-dot" />
-                {runtime.driveStatus.label}
-              </span>
-              <span className={`status-pill status-pill--${runtime.runtimeBadgeTone}`}>
-                <span className="status-dot" />
-                {runtime.runtimeStatusLabel}
-              </span>
-            </div>
-          </div>
-
-          <div className="topbar-actions">
-            <label className="field">
-              <span>Drive letter</span>
-              <select
-                onChange={(event) => runtime.setSelectedDrive(event.target.value || null)}
-                value={runtime.draftSettings.selectedDrive ?? ''}
-              >
-                <option value="">Select drive</option>
-                {runtime.selectableDrives.length === 0 ? (
-                  <option disabled value="">
-                    No drives detected — click Refresh
-                  </option>
-                ) : (
-                  runtime.selectableDrives.map((candidate) => (
-                    <option key={candidate.letter} value={candidate.letter}>
-                      {candidate.letter}:\\ {candidate.isReachable ? 'reachable' : 'manual'}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
-
-            <button
-              className="secondary-button"
-              onClick={() => void runtime.refreshDriveDetection()}
-              type="button"
-            >
-              Refresh drives
-            </button>
-          </div>
-        </header>
-
         {runtime.topLevelAppError ? (
           <div className="banner banner--error">{runtime.topLevelAppError}</div>
         ) : null}
-        {runtime.appNotice ? <div className="banner banner--success">{runtime.appNotice}</div> : null}
+        {runtime.appNotice ? (
+          <div className="banner banner--success">{runtime.appNotice}</div>
+        ) : null}
 
         {runtime.isInitializing ? (
           <section className="panel panel--loading">
@@ -116,89 +75,24 @@ function App() {
 
         {!runtime.isInitializing && runtime.activeView === 'home' ? (
           <HomeView
-            canStartSync={runtime.canStartSync}
-            cleanupFeedItems={runtime.cleanupFeedItems}
-            copiedCount={runtime.runState.copiedCount}
-            deletedCount={runtime.runState.deletedCount}
-            homeCounts={runtime.homeCounts}
-            homePanelClassName={runtime.homePanelClassName}
-            isPreviewing={runtime.isPreviewing}
-            onPreview={runtime.handlePreview}
-            onRetry={runtime.handleRetryRuntimeAction}
-            onStartSync={runtime.handleStartSync}
-            onStop={runtime.runtimeScope === 'preview' ? runtime.handleStopPreview : runtime.handleStopSync}
-            onViewResults={runtime.handleViewResults}
-            previewStatusMessage={runtime.previewStatusMessage}
-            processedCount={runtime.processedCount}
-            processedTotal={runtime.processedTotal}
-            runState={runtime.runState}
-            runtimeCanViewResults={runtime.runtimeCanViewResults}
-            runtimeCurrentDetail={runtime.runtimeCurrentDetail}
-            runtimeCurrentTitle={runtime.runtimeCurrentTitle}
-            runtimeError={runtime.runtimeError}
-            runtimeErrorTitle={runtime.runtimeErrorTitle}
-            runtimeHeadline={runtime.runtimeHeadline}
-            runtimePhase={runtime.runtimePhase}
-            runtimeScope={runtime.runtimeScope}
-            syncTerminalEntries={runtime.syncTerminalEntries}
-            transferFeedItems={runtime.transferFeedItems}
+            isConsoleStatusCollapsed={isConsoleStatusCollapsed}
+            setIsConsoleStatusCollapsed={setIsConsoleStatusCollapsed}
           />
         ) : null}
-
-        {!runtime.isInitializing && runtime.activeView === 'preview' ? (
-          <PreviewView
-            canStartSync={runtime.canStartSync}
-            isPreviewing={runtime.isPreviewing}
-            onPreview={runtime.handlePreview}
-            onRetry={runtime.handleRetryRuntimeAction}
-            onStartSync={runtime.handleStartSync}
-            onStopPreview={runtime.handleStopPreview}
-            previewActions={runtime.previewActions}
-            previewCopyDetail={runtime.previewCopyDetail}
-            previewPlan={runtime.previewPlan}
-            previewStatusMessage={runtime.previewStatusMessage}
-            previewTerminalEntries={runtime.previewTerminalEntries}
-            runtimeBadgeTone={runtime.runtimeBadgeTone}
-            runtimePhase={runtime.runtimePhase}
-            runtimeScope={runtime.runtimeScope}
-            runtimeStatusLabel={runtime.runtimeStatusLabel}
-          />
-        ) : null}
-
-        {!runtime.isInitializing && runtime.activeView === 'history' ? (
-          <HistoryView
-            historyRecords={runtime.historyRecords}
-            isHistoryLoading={runtime.isHistoryLoading}
-            onRefreshHistory={runtime.refreshHistory}
-          />
-        ) : null}
-
-        {!runtime.isInitializing && runtime.activeView === 'folder-selection' ? (
-          <FolderSelectionView
-            appNotice={runtime.appNotice}
-            draftSettings={runtime.draftSettings}
-            enabledFolderCount={runtime.enabledFolderCount}
-            folderDefinitions={runtime.folderDefinitions}
-            hasUnsavedChanges={runtime.hasUnsavedChanges}
-            isSaving={runtime.isSaving}
-            onApply={runtime.handleApplySettings}
-            onReset={runtime.handleResetSettings}
-            onToggleFolder={runtime.handleFolderToggle}
-          />
-        ) : null}
-
-        {!runtime.isInitializing && runtime.activeView === 'firmware-retention' ? (
-          <FirmwareRetentionView
-            firmwareRetentionEnabled={runtime.draftSettings.firmwareRetentionEnabled}
-            hasUnsavedChanges={runtime.hasUnsavedChanges}
-            isSaving={runtime.isSaving}
-            onApply={runtime.handleApplySettings}
-            onReset={runtime.handleResetSettings}
-            onToggleRetention={runtime.handleFirmwareRetentionToggle}
-          />
-        ) : null}
+        {!runtime.isInitializing && runtime.activeView === 'preview' ? <PreviewView /> : null}
+        {!runtime.isInitializing && runtime.activeView === 'history' ? <HistoryView /> : null}
+        {!runtime.isInitializing && runtime.activeView === 'folder-selection' ? <FolderSelectionView /> : null}
+        {!runtime.isInitializing && runtime.activeView === 'firmware-retention' ? <FirmwareRetentionView /> : null}
       </main>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <SyncRuntimeProvider>
+      <AppContent />
+    </SyncRuntimeProvider>
   )
 }
 

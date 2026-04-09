@@ -3,7 +3,13 @@ import { CollapsibleLogPanel, ProgressBar, TerminalPanel } from '../components/a
 import { useSyncRuntimeContext } from '../context/SyncRuntimeContext'
 import { formatProgress } from '../lib/runtime'
 
-export function HomeView() {
+export function HomeView({
+  isConsoleStatusCollapsed,
+  setIsConsoleStatusCollapsed,
+}: {
+  isConsoleStatusCollapsed: boolean
+  setIsConsoleStatusCollapsed: (value: boolean | ((prev: boolean) => boolean)) => void
+}) {
   const {
     canStartSync,
     cleanupFeedItems,
@@ -39,7 +45,6 @@ export function HomeView() {
     handleViewResults,
   } = useSyncRuntimeContext()
 
-  const [isConsoleStatusCollapsed, setIsConsoleStatusCollapsed] = useState(false)
   const [isCurrentRunCollapsed, setIsCurrentRunCollapsed] = useState(false)
   const [isHomeTerminalOpen, setIsHomeTerminalOpen] = useState(false)
   const [isTransferFeedOpen, setIsTransferFeedOpen] = useState(false)
