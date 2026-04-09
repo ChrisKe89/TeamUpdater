@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { detectShareFileDrives, writeClientLog } from '../lib/desktop'
 import { mergeSettings } from '../lib/settings'
+import { getErrorMessage } from '../lib/errors'
 import type { AppSettings, FolderDefinition, NavView, RunAuditRecord, SyncPlan, SyncRunState, TerminalEntry } from '../types'
 import type { RuntimePhase, RuntimeScope } from '../lib/runtime'
 import { useDriveDetection } from './useDriveDetection'
@@ -233,10 +234,4 @@ export function useSyncRuntime(): SyncRuntimeState & SyncRuntimeActions {
     canStartSync,
     topLevelAppError,
   }
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return fallback
 }

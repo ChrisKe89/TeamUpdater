@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react'
 import { saveSettings } from '../lib/desktop'
 import { areSettingsEqual, buildDefaultSettings, mergeSettings } from '../lib/settings'
+import { getErrorMessage } from '../lib/errors'
 import type { AppSettings, FolderDefinition } from '../types'
 
 export interface UseSettingsOptions {
@@ -96,10 +97,4 @@ export function useSettings({ onError, onNotice, folderDefinitions }: UseSetting
     handleFirmwareRetentionToggle,
     setSelectedDrive,
   }
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return fallback
 }

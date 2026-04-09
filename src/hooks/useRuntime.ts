@@ -32,6 +32,7 @@ import {
   type RuntimeScope,
 } from '../lib/runtime'
 import { mergeSettings } from '../lib/settings'
+import { getErrorMessage } from '../lib/errors'
 import type {
   AppSettings,
   DetectDrivesResponse,
@@ -452,10 +453,4 @@ export function useRuntime({
     navigateToHistory,
     handleViewResults,
   }
-}
-
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return fallback
 }
