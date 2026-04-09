@@ -85,6 +85,7 @@ export function runtimeReducer(
         phase: 'running',
         scope: 'sync',
         error: null,
+        previewPlan: null,
         previewStatusMessage: 'Ready to generate a preview.',
         terminalEntries: [],
         runState: { ...initialRunState, isRunning: true, lastMessage: 'Sync queued.' },

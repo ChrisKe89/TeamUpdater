@@ -43,6 +43,12 @@ describe('runtimeReducer', () => {
     expect(next.error).toBeNull()
   })
 
+  it('SYNC_INITIATED clears previewPlan', () => {
+    const stateWithPlan = { ...initialRuntimeState, previewPlan: { actions: [] } as any }
+    const next = runtimeReducer(stateWithPlan, { type: 'SYNC_INITIATED' })
+    expect(next.previewPlan).toBeNull()
+  })
+
   it('SYNC_EVENT preview_started updates preview state atomically', () => {
     const next = runtimeReducer(initialRuntimeState, {
       type: 'SYNC_EVENT',
@@ -117,6 +123,33 @@ describe('runtimeReducer', () => {
     const loaded = runtimeReducer(loading, { type: 'HISTORY_LOADED', records })
     expect(loaded.isHistoryLoading).toBe(false)
     expect(loaded.historyRecords).toBe(records)
+  })
+
+  it('HISTORY_FAILED clears loading flag', () => {
+    const loading = runtimeReducer(initialRuntimeState, { type: 'HISTORY_LOADING' })
+    const failed = runtimeReducer(loading, { type: 'HISTORY_FAILED' })
+    expect(failed.isHistoryLoading).toBe(false)
+  })
+
+  it('SYNC_EVENT preview_stopped resets to idle', () => {
+    const next = runtimeReducer(initialRuntimeState, {
+      type: 'SYNC_EVENT',
+      payload: { kind: 'preview_stopped', message: 'Stopped.' },
+    })
+    expect(next.phase).toBe('idle')
+    expect(next.isPreviewing).toBe(false)
+    expect(next.previewStatusMessage).toBe('Stopped.')
+  })
+
+  it('SYNC_EVENT run_stopped transitions to completed', () => {
+    const summary = { copiedFiles: 1 } as any
+    const next = runtimeReducer(initialRuntimeState, {
+      type: 'SYNC_EVENT',
+      payload: { kind: 'run_stopped', summary, message: 'Stopped.' },
+    })
+    expect(next.phase).toBe('completed')
+    expect(next.scope).toBe('sync')
+    expect(next.error).toBeNull()
   })
 
   it('SET_ACTIVE_VIEW changes only the active view', () => {
