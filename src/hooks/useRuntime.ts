@@ -231,10 +231,9 @@ export function useRuntime({
     try {
       await startPreview(mergeSettings(folderDefinitions, draftSettings, autoSelectedDrive))
     } catch (error) {
-      dispatch({
-        type: 'SYNC_EVENT',
-        payload: { kind: 'preview_failed', message: getErrorMessage(error, 'Unable to build the sync preview.') },
-      })
+      const message = getErrorMessage(error, 'Unable to build the sync preview.')
+      onErrorRef.current(message)
+      dispatch({ type: 'SYNC_EVENT', payload: { kind: 'preview_failed', message } })
     }
   }, [state.runState.isRunning, state.isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
 
@@ -254,10 +253,9 @@ export function useRuntime({
     try {
       await startSync(mergeSettings(folderDefinitions, draftSettings, autoSelectedDrive))
     } catch (error) {
-      dispatch({
-        type: 'SYNC_EVENT',
-        payload: { kind: 'run_failed', message: getErrorMessage(error, 'Unable to start sync.') },
-      })
+      const message = getErrorMessage(error, 'Unable to start sync.')
+      onErrorRef.current(message)
+      dispatch({ type: 'SYNC_EVENT', payload: { kind: 'run_failed', message } })
     }
   }, [state.runState.isRunning, state.isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
 
