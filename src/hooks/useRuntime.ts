@@ -1,5 +1,5 @@
 // src/hooks/useRuntime.ts
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useReducer } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
   detectShareFileDrives,
@@ -14,7 +14,6 @@ import {
   writeClientLog,
 } from '../lib/desktop'
 import {
-  appendTerminalEntry,
   getCleanupFeedItems,
   getHomeCounts,
   getHomePanelClassName,
@@ -26,24 +25,19 @@ import {
   getRuntimeStatusLabel,
   getScopedTerminalEntries,
   getTransferFeedItems,
-  initialRunState,
-  reduceSyncEvent,
   type RuntimePhase,
   type RuntimeScope,
 } from '../lib/runtime'
-import { mergeSettings } from '../lib/settings'
+import { initialRuntimeState, runtimeReducer } from '../lib/runtime-reducer'
 import { getErrorMessage } from '../lib/errors'
+import { mergeSettings } from '../lib/settings'
 import type {
   AppSettings,
   DetectDrivesResponse,
   DriveCandidate,
   FolderDefinition,
   NavView,
-  RunAuditRecord,
   SyncEvent,
-  SyncPlan,
-  SyncRunState,
-  TerminalEntry,
 } from '../types'
 
 export interface UseRuntimeOptions {
@@ -69,69 +63,45 @@ export function useRuntime({
   initializeDrives,
   onFolderDefinitionsLoaded,
 }: UseRuntimeOptions) {
-  const [activeView, setActiveView] = useState<NavView>('home')
-  const [runState, setRunState] = useState<SyncRunState>(initialRunState)
-  const [previewPlan, setPreviewPlan] = useState<SyncPlan | null>(null)
-  const [historyRecords, setHistoryRecords] = useState<RunAuditRecord[]>([])
-  const [isInitializing, setIsInitializing] = useState(true)
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
-  const [isPreviewing, setIsPreviewing] = useState(false)
-  const [previewStatusMessage, setPreviewStatusMessage] = useState('Ready to generate a preview.')
-  const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([])
-  const [runtimePhase, setRuntimePhase] = useState<RuntimePhase>('idle')
-  const [runtimeScope, setRuntimeScope] = useState<RuntimeScope>(null)
-  const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [state, dispatch] = useReducer(runtimeReducer, initialRuntimeState)
 
   const onErrorRef = useRef(onError)
-  useEffect(() => {
-    onErrorRef.current = onError
-  }, [onError])
+  useEffect(() => { onErrorRef.current = onError }, [onError])
 
   const onNoticeRef = useRef(onNotice)
-  useEffect(() => {
-    onNoticeRef.current = onNotice
-  }, [onNotice])
+  useEffect(() => { onNoticeRef.current = onNotice }, [onNotice])
 
   const refreshHistory = useCallback(async () => {
     if (!isDesktopRuntime) return
-    setIsHistoryLoading(true)
+    dispatch({ type: 'HISTORY_LOADING' })
     onErrorRef.current(null)
     try {
       const records = await loadRunHistory()
-      setHistoryRecords(records)
+      dispatch({ type: 'HISTORY_LOADED', records })
     } catch (error) {
       onErrorRef.current(getErrorMessage(error, 'Unable to load run history.'))
-    } finally {
-      setIsHistoryLoading(false)
+      dispatch({ type: 'HISTORY_FAILED' })
     }
   }, [])
 
   const refreshHistoryRef = useRef(refreshHistory)
-  useEffect(() => {
-    refreshHistoryRef.current = refreshHistory
-  }, [refreshHistory])
+  useEffect(() => { refreshHistoryRef.current = refreshHistory }, [refreshHistory])
 
   const onFolderDefinitionsLoadedRef = useRef(onFolderDefinitionsLoaded)
-  useEffect(() => {
-    onFolderDefinitionsLoadedRef.current = onFolderDefinitionsLoaded
-  }, [onFolderDefinitionsLoaded])
+  useEffect(() => { onFolderDefinitionsLoadedRef.current = onFolderDefinitionsLoaded }, [onFolderDefinitionsLoaded])
 
   const hydrateSettingsRef = useRef(hydrateSettings)
-  useEffect(() => {
-    hydrateSettingsRef.current = hydrateSettings
-  }, [hydrateSettings])
+  useEffect(() => { hydrateSettingsRef.current = hydrateSettings }, [hydrateSettings])
 
   const initializeDrivesRef = useRef(initializeDrives)
-  useEffect(() => {
-    initializeDrivesRef.current = initializeDrives
-  }, [initializeDrives])
+  useEffect(() => { initializeDrivesRef.current = initializeDrives }, [initializeDrives])
 
   useEffect(() => {
     let cancelled = false
 
     const init = async () => {
       try {
-        const [loadedSettings, detectedDrives, loadedHistory, loadedFolderDefs] = await Promise.all([
+        const [loadedSettings, detectedDrives, records, loadedFolderDefs] = await Promise.all([
           loadSettings(),
           detectShareFileDrives(),
           loadRunHistory(),
@@ -141,15 +111,11 @@ export function useRuntime({
         onFolderDefinitionsLoadedRef.current(loadedFolderDefs)
         hydrateSettingsRef.current(loadedSettings, detectedDrives.autoSelected, loadedFolderDefs)
         initializeDrivesRef.current(detectedDrives)
-        setHistoryRecords(loadedHistory)
+        dispatch({ type: 'INIT_COMPLETE', records })
       } catch (error) {
         if (!cancelled) {
           onErrorRef.current(getErrorMessage(error, 'Unable to initialise the app.'))
-        }
-      } finally {
-        if (!cancelled) {
-          setIsInitializing(false)
-          setIsHistoryLoading(false)
+          dispatch({ type: 'INIT_FAILED' })
         }
       }
     }
@@ -157,69 +123,16 @@ export function useRuntime({
     const unlistenPromise = isDesktopRuntime
       ? listen<SyncEvent>('sync://event', (event) => {
           if (cancelled) return
+          dispatch({ type: 'SYNC_EVENT', payload: event.payload })
           const payload = event.payload
-
-          switch (payload.kind) {
-            case 'preview_started':
-              setIsPreviewing(true)
-              setRuntimePhase('running')
-              setRuntimeScope('preview')
-              setRuntimeError(null)
-              setPreviewStatusMessage(payload.message)
-              setTerminalEntries([])
-              return
-            case 'preview_completed':
-              setIsPreviewing(false)
-              setRuntimePhase('preview-ready')
-              setRuntimeScope('preview')
-              setRuntimeError(null)
-              setPreviewPlan(payload.plan)
-              setActiveView('preview')
-              setPreviewStatusMessage(payload.message)
-              return
-            case 'preview_stopped':
-              setIsPreviewing(false)
-              setRuntimePhase('idle')
-              setRuntimeScope('preview')
-              setPreviewStatusMessage(payload.message)
-              return
-            case 'preview_failed':
-              setIsPreviewing(false)
-              setRuntimePhase('error')
-              setRuntimeScope('preview')
-              setRuntimeError(payload.message)
-              setPreviewStatusMessage(payload.message)
-              onErrorRef.current(payload.message)
-              return
-            case 'log_line':
-              setTerminalEntries((previous) => appendTerminalEntry(previous, payload))
-              return
-            default:
-              setRunState((previous) => reduceSyncEvent(previous, payload))
-              if (payload.kind === 'run_started') {
-                setRuntimePhase('running')
-                setRuntimeScope('sync')
-                setRuntimeError(null)
-                setTerminalEntries([])
-              }
-              if (payload.kind === 'run_completed' || payload.kind === 'run_stopped') {
-                setRuntimePhase('completed')
-                setRuntimeScope('sync')
-                setRuntimeError(null)
-              }
-              if (payload.kind === 'run_failed') {
-                setRuntimePhase('error')
-                setRuntimeScope('sync')
-                setRuntimeError(payload.message)
-                onErrorRef.current(payload.message)
-              }
-              if (
-                payload.kind === 'run_completed' ||
-                payload.kind === 'run_stopped' ||
-                payload.kind === 'run_failed'
-              ) {
-                void refreshHistoryRef.current()
-              }
+          if (payload.kind === 'preview_failed') onErrorRef.current(payload.message)
+          if (payload.kind === 'run_failed') onErrorRef.current(payload.message)
+          if (
+            payload.kind === 'run_completed' ||
+            payload.kind === 'run_stopped' ||
+            payload.kind === 'run_failed'
+          ) {
+            void refreshHistoryRef.current()
           }
         })
       : Promise.resolve(() => undefined)
@@ -235,102 +148,95 @@ export function useRuntime({
   useEffect(() => {
     void writeClientLog(
       'INFO',
-      `Runtime state changed: phase=${runtimePhase}, scope=${runtimeScope ?? 'none'}`,
+      `Runtime state changed: phase=${state.phase}, scope=${state.scope ?? 'none'}`,
     )
-  }, [runtimePhase, runtimeScope])
+  }, [state.phase, state.scope])
 
   // Derived values
   const syncTerminalEntries = useMemo(
-    () => getScopedTerminalEntries(terminalEntries, 'sync'),
-    [terminalEntries],
+    () => getScopedTerminalEntries(state.terminalEntries, 'sync'),
+    [state.terminalEntries],
   )
   const previewTerminalEntries = useMemo(
-    () => getScopedTerminalEntries(terminalEntries, 'preview'),
-    [terminalEntries],
+    () => getScopedTerminalEntries(state.terminalEntries, 'preview'),
+    [state.terminalEntries],
   )
   const transferFeedItems = useMemo(
-    () => getTransferFeedItems(runState.transferLog, syncTerminalEntries),
-    [runState.transferLog, syncTerminalEntries],
+    () => getTransferFeedItems(state.runState.transferLog, syncTerminalEntries),
+    [state.runState.transferLog, syncTerminalEntries],
   )
   const cleanupFeedItems = useMemo(
-    () => getCleanupFeedItems(runState.deletionLog, syncTerminalEntries),
-    [runState.deletionLog, syncTerminalEntries],
+    () => getCleanupFeedItems(state.runState.deletionLog, syncTerminalEntries),
+    [state.runState.deletionLog, syncTerminalEntries],
   )
-  const previewActions = useMemo(() => getPreviewActions(previewPlan), [previewPlan])
-  const previewCopyDetail = previewPlan ? `${previewPlan.summary.totalCopyBytesLabel} to copy` : undefined
-  const plannedCopyCount = previewPlan?.summary.copyCount ?? runState.summary?.plannedCopyFiles ?? 0
-  const plannedDeleteCount = previewPlan?.summary.deleteCount ?? runState.summary?.plannedDeleteFiles ?? 0
-  const processedCount = runState.copiedCount + runState.deletedCount
+  const previewActions = useMemo(() => getPreviewActions(state.previewPlan), [state.previewPlan])
+  const previewCopyDetail = state.previewPlan
+    ? `${state.previewPlan.summary.totalCopyBytesLabel} to copy`
+    : undefined
+  const plannedCopyCount =
+    state.previewPlan?.summary.copyCount ?? state.runState.summary?.plannedCopyFiles ?? 0
+  const plannedDeleteCount =
+    state.previewPlan?.summary.deleteCount ?? state.runState.summary?.plannedDeleteFiles ?? 0
+  const processedCount = state.runState.copiedCount + state.runState.deletedCount
   const processedTotal = plannedCopyCount + plannedDeleteCount
-  const runtimeStatusLabel = getRuntimeStatusLabel(runtimePhase, runtimeScope)
-  const runtimeBadgeTone = getRuntimeBadgeTone(runtimePhase)
+  const runtimeStatusLabel = getRuntimeStatusLabel(state.phase, state.scope)
+  const runtimeBadgeTone = getRuntimeBadgeTone(state.phase)
   const homeTransferTitle =
-    runState.currentItem?.displayName ??
-    (runState.isRunning ? 'Preparing transfer' : 'No active transfer')
+    state.runState.currentItem?.displayName ??
+    (state.runState.isRunning ? 'Preparing transfer' : 'No active transfer')
   const homeTransferDetail =
-    runState.currentItem?.sourcePath ??
-    (runState.isRunning ? runState.lastMessage : 'Run preview or update to start a transfer.')
+    state.runState.currentItem?.sourcePath ??
+    (state.runState.isRunning ? state.runState.lastMessage : 'Run preview or update to start a transfer.')
   const runtimeHeadline = getRuntimeHeadline({
-    isPreviewing,
-    phase: runtimePhase,
-    previewCount: previewPlan?.actions.length ?? 0,
+    isPreviewing: state.isPreviewing,
+    phase: state.phase,
+    previewCount: state.previewPlan?.actions.length ?? 0,
     processedCount,
     processedTotal,
-    runMessage: runState.lastMessage,
-    runtimeError,
+    runMessage: state.runState.lastMessage,
+    runtimeError: state.error,
   })
   const runtimeCurrentTitle = getRuntimeCurrentTitle({
     homeTransferTitle,
-    isPreviewing,
-    phase: runtimePhase,
-    previewStatusMessage,
-    runtimeError,
+    isPreviewing: state.isPreviewing,
+    phase: state.phase,
+    previewStatusMessage: state.previewStatusMessage,
+    runtimeError: state.error,
   })
   const runtimeCurrentDetail = getRuntimeCurrentDetail({
     homeTransferDetail,
-    isPreviewing,
-    phase: runtimePhase,
-    previewStatusMessage,
-    runtimeError,
+    isPreviewing: state.isPreviewing,
+    phase: state.phase,
+    previewStatusMessage: state.previewStatusMessage,
+    runtimeError: state.error,
   })
-  const runtimeCanViewResults = Boolean(previewPlan || runState.summary)
-  const runtimeErrorTitle = runtimeScope === 'preview' ? 'Preview failed' : 'Update failed'
-  const homePanelClassName = getHomePanelClassName(runtimePhase)
+  const runtimeCanViewResults = Boolean(state.previewPlan || state.runState.summary)
+  const runtimeErrorTitle = state.scope === 'preview' ? 'Preview failed' : 'Update failed'
+  const homePanelClassName = getHomePanelClassName(state.phase)
   const enabledFolderCount = useMemo(
     () => Object.values(draftSettings.folders).filter(Boolean).length,
     [draftSettings.folders],
   )
   const homeCounts = useMemo(
-    () => getHomeCounts(enabledFolderCount, previewPlan, runState.summary),
-    [enabledFolderCount, previewPlan, runState.summary],
+    () => getHomeCounts(enabledFolderCount, state.previewPlan, state.runState.summary),
+    [enabledFolderCount, state.previewPlan, state.runState.summary],
   )
 
   // Actions
   const handlePreview = useCallback(async () => {
-    if (runState.isRunning || isPreviewing) return
-    setIsPreviewing(true)
-    setRuntimePhase('running')
-    setRuntimeScope('preview')
-    setRuntimeError(null)
+    if (state.runState.isRunning || state.isPreviewing) return
     onErrorRef.current(null)
     onNoticeRef.current(null)
-    setPreviewStatusMessage('Preview queued.')
-    setTerminalEntries([])
+    dispatch({ type: 'PREVIEW_INITIATED' })
     try {
-      const nextSettings = mergeSettings(folderDefinitions, draftSettings, autoSelectedDrive)
-      setActiveView('preview')
-      setPreviewPlan(null)
-      await startPreview(nextSettings)
+      await startPreview(mergeSettings(folderDefinitions, draftSettings, autoSelectedDrive))
     } catch (error) {
-      setIsPreviewing(false)
-      const message = getErrorMessage(error, 'Unable to build the sync preview.')
-      setRuntimePhase('error')
-      setRuntimeScope('preview')
-      setRuntimeError(message)
-      setPreviewStatusMessage(message)
-      onErrorRef.current(message)
+      dispatch({
+        type: 'SYNC_EVENT',
+        payload: { kind: 'preview_failed', message: getErrorMessage(error, 'Unable to build the sync preview.') },
+      })
     }
-  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
+  }, [state.runState.isRunning, state.isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
 
   const handleStopPreview = useCallback(async () => {
     try {
@@ -341,35 +247,19 @@ export function useRuntime({
   }, [])
 
   const handleStartSync = useCallback(async () => {
-    if (runState.isRunning || isPreviewing) return
-    setRuntimePhase('running')
-    setRuntimeScope('sync')
-    setRuntimeError(null)
+    if (state.runState.isRunning || state.isPreviewing) return
     onErrorRef.current(null)
     onNoticeRef.current(null)
-    setTerminalEntries([])
-    setPreviewStatusMessage('Ready to generate a preview.')
-    setActiveView('home')
-    setRunState({
-      ...initialRunState,
-      isRunning: true,
-      lastMessage: 'Sync queued.',
-    })
+    dispatch({ type: 'SYNC_INITIATED' })
     try {
       await startSync(mergeSettings(folderDefinitions, draftSettings, autoSelectedDrive))
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to start sync.')
-      setRuntimePhase('error')
-      setRuntimeScope('sync')
-      setRuntimeError(message)
-      setRunState((previous) => ({
-        ...previous,
-        isRunning: false,
-        lastMessage: message,
-      }))
-      onErrorRef.current(message)
+      dispatch({
+        type: 'SYNC_EVENT',
+        payload: { kind: 'run_failed', message: getErrorMessage(error, 'Unable to start sync.') },
+      })
     }
-  }, [runState.isRunning, isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
+  }, [state.runState.isRunning, state.isPreviewing, draftSettings, autoSelectedDrive, folderDefinitions])
 
   const handleStopSync = useCallback(async () => {
     try {
@@ -380,7 +270,7 @@ export function useRuntime({
   }, [])
 
   const handleQuit = useCallback(async () => {
-    if (runState.isRunning || isPreviewing) {
+    if (state.runState.isRunning || state.isPreviewing) {
       const shouldQuit = window.confirm('A preview or sync is currently running. Quit the app anyway?')
       if (!shouldQuit) return
     }
@@ -389,42 +279,46 @@ export function useRuntime({
     } catch (error) {
       onErrorRef.current(getErrorMessage(error, 'Unable to quit.'))
     }
-  }, [runState.isRunning, isPreviewing])
+  }, [state.runState.isRunning, state.isPreviewing])
 
   const handleRetryRuntimeAction = useCallback(async () => {
-    if (runtimeScope === 'preview') {
+    if (state.scope === 'preview') {
       await handlePreview()
       return
     }
     await handleStartSync()
-  }, [runtimeScope, handlePreview, handleStartSync])
+  }, [state.scope, handlePreview, handleStartSync])
 
   const navigateToHistory = useCallback(() => {
-    setActiveView('history')
+    dispatch({ type: 'SET_ACTIVE_VIEW', view: 'history' })
     void refreshHistory()
   }, [refreshHistory])
 
   const handleViewResults = useCallback(() => {
-    if (previewPlan) {
-      setActiveView('preview')
+    if (state.previewPlan) {
+      dispatch({ type: 'SET_ACTIVE_VIEW', view: 'preview' })
       return
     }
     navigateToHistory()
-  }, [previewPlan, navigateToHistory])
+  }, [state.previewPlan, navigateToHistory])
+
+  const setActiveView = useCallback((view: NavView) => {
+    dispatch({ type: 'SET_ACTIVE_VIEW', view })
+  }, [])
 
   return {
-    activeView,
+    activeView: state.activeView,
     setActiveView,
-    runState,
-    previewPlan,
-    historyRecords,
-    isInitializing,
-    isHistoryLoading,
-    isPreviewing,
-    previewStatusMessage,
-    runtimePhase,
-    runtimeScope,
-    runtimeError,
+    runState: state.runState,
+    previewPlan: state.previewPlan,
+    historyRecords: state.historyRecords,
+    isInitializing: state.isInitializing,
+    isHistoryLoading: state.isHistoryLoading,
+    isPreviewing: state.isPreviewing,
+    previewStatusMessage: state.previewStatusMessage,
+    runtimePhase: state.phase,
+    runtimeScope: state.scope,
+    runtimeError: state.error,
     runtimeErrorTitle,
     runtimeCanViewResults,
     syncTerminalEntries,
