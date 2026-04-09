@@ -1,9 +1,9 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import { useSyncRuntime, type SyncRuntimeState, type SyncRuntimeActions } from '../hooks/useSyncRuntime'
 
-type SyncRuntimeContextValue = SyncRuntimeState & SyncRuntimeActions
+export type SyncRuntimeContextValue = SyncRuntimeState & SyncRuntimeActions
 
-const SyncRuntimeContext = createContext<SyncRuntimeContextValue | null>(null)
+export const SyncRuntimeContext = createContext<SyncRuntimeContextValue | null>(null)
 
 export function SyncRuntimeProvider({ children }: { children: ReactNode }) {
   const runtime = useSyncRuntime()

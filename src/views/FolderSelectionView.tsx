@@ -1,28 +1,18 @@
-import type { AppSettings, FolderDefinition } from '../types'
+import { useSyncRuntimeContext } from '../context/SyncRuntimeContext'
 
-export interface FolderSelectionViewProps {
-  appNotice: string | null
-  draftSettings: AppSettings
-  enabledFolderCount: number
-  folderDefinitions: FolderDefinition[]
-  hasUnsavedChanges: boolean
-  isSaving: boolean
-  onApply: () => Promise<void>
-  onReset: () => void
-  onToggleFolder: (folder: FolderDefinition) => void
-}
+export function FolderSelectionView() {
+  const {
+    appNotice,
+    draftSettings,
+    enabledFolderCount,
+    folderDefinitions,
+    hasUnsavedChanges,
+    isSaving,
+    handleApplySettings,
+    handleFolderToggle,
+    handleResetSettings,
+  } = useSyncRuntimeContext()
 
-export function FolderSelectionView({
-  appNotice,
-  draftSettings,
-  enabledFolderCount,
-  folderDefinitions,
-  hasUnsavedChanges,
-  isSaving,
-  onApply,
-  onReset,
-  onToggleFolder,
-}: FolderSelectionViewProps) {
   return (
     <section className="panel settings-panel">
       <div className="panel-heading">
@@ -39,7 +29,7 @@ export function FolderSelectionView({
             className={`switch-row ${draftSettings.folders[folder.key] ? 'is-on' : ''}`}
             disabled={folder.isMandatory}
             key={folder.key}
-            onClick={() => onToggleFolder(folder)}
+            onClick={() => handleFolderToggle(folder)}
             type="button"
           >
             <span className="folder-copy">
@@ -57,7 +47,7 @@ export function FolderSelectionView({
         <button
           className="primary-button"
           disabled={!hasUnsavedChanges || isSaving}
-          onClick={() => void onApply()}
+          onClick={() => void handleApplySettings()}
           type="button"
         >
           {isSaving ? 'Saving...' : 'Apply'}
@@ -65,7 +55,7 @@ export function FolderSelectionView({
         <button
           className="secondary-button"
           disabled={!hasUnsavedChanges || isSaving}
-          onClick={onReset}
+          onClick={handleResetSettings}
           type="button"
         >
           Cancel

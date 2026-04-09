@@ -6,6 +6,8 @@ import { HistoryView } from './HistoryView'
 import { FolderSelectionView } from './FolderSelectionView'
 import { FirmwareRetentionView } from './FirmwareRetentionView'
 import { buildDefaultSettings, getFolderDefinitions } from '../lib/settings'
+import { initialRunState } from '../lib/runtime'
+import { SyncRuntimeContext, type SyncRuntimeContextValue } from '../context/SyncRuntimeContext'
 import type { SyncPlan } from '../types'
 
 const previewPlan: SyncPlan = {
@@ -33,47 +35,87 @@ const previewPlan: SyncPlan = {
   },
 }
 
+const folderDefs = getFolderDefinitions()
+const defaultSettings = buildDefaultSettings(folderDefs, 'S')
+
+function makeCtx(overrides: Partial<SyncRuntimeContextValue> = {}): SyncRuntimeContextValue {
+  return {
+    activeView: 'home',
+    appError: null,
+    appNotice: null,
+    canStartSync: true,
+    cleanupFeedItems: [],
+    draftSettings: defaultSettings,
+    driveStatus: { tone: 'online', label: 'Connected to S:\\' },
+    enabledFolderCount: 2,
+    folderDefinitions: folderDefs,
+    hasUnsavedChanges: false,
+    historyRecords: [],
+    homeCounts: [
+      { label: 'Selected folders', value: '2' },
+      { label: 'Planned copies', value: '0' },
+      { label: 'Planned deletes', value: '0' },
+    ],
+    homePanelClassName: 'panel highlight-panel runtime-panel',
+    isHistoryLoading: false,
+    isInitializing: false,
+    isPreviewing: false,
+    isSaving: false,
+    previewActions: { copies: [], deletes: [], skippedDeletes: [] },
+    previewCopyDetail: undefined,
+    previewPlan: null,
+    previewStatusMessage: 'Ready to generate a preview.',
+    previewTerminalEntries: [],
+    processedCount: 0,
+    processedTotal: 0,
+    runState: { ...initialRunState },
+    runtimeBadgeTone: 'neutral',
+    runtimeCanViewResults: false,
+    runtimeCurrentDetail: 'Run preview or update to start a transfer.',
+    runtimeCurrentTitle: 'No active transfer',
+    runtimeError: null,
+    runtimeErrorTitle: 'Update failed',
+    runtimeHeadline: 'Choose a run mode to start syncing.',
+    runtimePhase: 'idle',
+    runtimeScope: null,
+    runtimeStatusLabel: 'Idle',
+    selectableDrives: [{ letter: 'S', isReachable: true }],
+    settings: defaultSettings,
+    syncTerminalEntries: [],
+    topLevelAppError: null,
+    transferFeedItems: [],
+    handleApplySettings: vi.fn(async () => undefined),
+    handleFirmwareRetentionToggle: vi.fn(),
+    handleFolderToggle: vi.fn(),
+    handlePreview: vi.fn(async () => undefined),
+    handleQuit: vi.fn(async () => undefined),
+    handleResetSettings: vi.fn(),
+    handleRetryRuntimeAction: vi.fn(async () => undefined),
+    handleStartSync: vi.fn(async () => undefined),
+    handleStopPreview: vi.fn(async () => undefined),
+    handleStopSync: vi.fn(async () => undefined),
+    handleViewResults: vi.fn(),
+    navigateToHistory: vi.fn(),
+    refreshDriveDetection: vi.fn(async () => undefined),
+    refreshHistory: vi.fn(async () => undefined),
+    setActiveView: vi.fn(),
+    setSelectedDrive: vi.fn(),
+    ...overrides,
+  }
+}
+
+function renderWithCtx(ui: React.ReactElement, ctx: SyncRuntimeContextValue) {
+  return render(
+    <SyncRuntimeContext.Provider value={ctx}>{ui}</SyncRuntimeContext.Provider>,
+  )
+}
+
 describe('extracted views', () => {
   it('renders the home view in an idle state', () => {
-    render(
-      <HomeView
-        canStartSync
-        cleanupFeedItems={[]}
-        copiedCount={0}
-        deletedCount={0}
-        homeCounts={[
-          { label: 'Selected folders', value: '2' },
-          { label: 'Planned copies', value: '1' },
-          { label: 'Planned deletes', value: '0' },
-        ]}
-        homePanelClassName="panel highlight-panel runtime-panel"
-        isPreviewing={false}
-        onPreview={async () => undefined}
-        onRetry={async () => undefined}
-        onStartSync={async () => undefined}
-        onStop={async () => undefined}
-        onViewResults={() => undefined}
-        previewStatusMessage="Ready to generate a preview."
-        processedCount={0}
-        processedTotal={0}
-        runState={{
-          isRunning: false,
-          itemProgress: 0,
-          overallProgress: 0,
-          lastMessage: 'Ready to sync.',
-        }}
-        runtimeCanViewResults={false}
-        runtimeCurrentDetail="Run preview or update to start a transfer."
-        runtimeCurrentTitle="No active transfer"
-        runtimeError={null}
-        runtimeErrorTitle="Update failed"
-        runtimeHeadline="Choose a run mode to start syncing."
-        runtimePhase="idle"
-        runtimeScope={null}
-        syncTerminalEntries={[]}
-        transferFeedItems={[]}
-      />,
-    )
+    renderWithCtx(<HomeView />, makeCtx({
+      runtimeCurrentTitle: 'No active transfer',
+      runtimePhase: 'idle',
+    }))
 
     expect(screen.getByRole('heading', { name: 'No active transfer' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Run preview' })).toBeInTheDocument()
@@ -81,47 +123,39 @@ describe('extracted views', () => {
   })
 
   it('renders the home view in a running state with stop controls', () => {
-    const onStop = vi.fn(async () => undefined)
+    const handleStopSync = vi.fn(async () => undefined)
+    const handleStopPreview = vi.fn(async () => undefined)
 
-    render(
-      <HomeView
-        canStartSync
-        cleanupFeedItems={['Removed C:\\old.txt']}
-        copiedCount={1}
-        deletedCount={1}
-        homeCounts={[
-          { label: 'Selected folders', value: '2' },
-          { label: 'Planned copies', value: '4' },
-          { label: 'Planned deletes', value: '2' },
-        ]}
-        homePanelClassName="panel highlight-panel runtime-panel runtime-panel--running"
-        isPreviewing={false}
-        onPreview={async () => undefined}
-        onRetry={async () => undefined}
-        onStartSync={async () => undefined}
-        onStop={onStop}
-        onViewResults={() => undefined}
-        previewStatusMessage="Preview ready."
-        processedCount={2}
-        processedTotal={6}
-        runState={{
-          isRunning: true,
-          itemProgress: 35,
-          overallProgress: 50,
-          lastMessage: 'Copying C:\\CUSPAPPS\\file.txt',
-        }}
-        runtimeCanViewResults={false}
-        runtimeCurrentDetail="S:\\CUSPAPPS\\file.txt"
-        runtimeCurrentTitle="file.txt"
-        runtimeError={null}
-        runtimeErrorTitle="Update failed"
-        runtimeHeadline="Processing queued files."
-        runtimePhase="running"
-        runtimeScope="sync"
-        syncTerminalEntries={[{ line: 'Copying file.txt', scope: 'sync', timestamp: '1' }]}
-        transferFeedItems={['C:\\CUSPAPPS\\file.txt']}
-      />,
-    )
+    renderWithCtx(<HomeView />, makeCtx({
+      cleanupFeedItems: ['Removed C:\\old.txt'],
+      homeCounts: [
+        { label: 'Selected folders', value: '2' },
+        { label: 'Planned copies', value: '4' },
+        { label: 'Planned deletes', value: '2' },
+      ],
+      homePanelClassName: 'panel highlight-panel runtime-panel runtime-panel--running',
+      isPreviewing: false,
+      previewStatusMessage: 'Preview ready.',
+      processedCount: 2,
+      processedTotal: 6,
+      runState: {
+        ...initialRunState,
+        isRunning: true,
+        itemProgress: 35,
+        overallProgress: 50,
+        copiedCount: 1,
+        deletedCount: 1,
+        lastMessage: 'Copying C:\\CUSPAPPS\\file.txt',
+      },
+      runtimeCurrentDetail: 'S:\\CUSPAPPS\\file.txt',
+      runtimeCurrentTitle: 'file.txt',
+      runtimePhase: 'running',
+      runtimeScope: 'sync',
+      syncTerminalEntries: [{ line: 'Copying file.txt', scope: 'sync', timestamp: '1' }],
+      transferFeedItems: ['C:\\CUSPAPPS\\file.txt'],
+      handleStopSync,
+      handleStopPreview,
+    }))
 
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(screen.getByText('35% complete')).toBeInTheDocument()
@@ -130,97 +164,71 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(onStop).toHaveBeenCalledTimes(2)
+    expect(handleStopSync).toHaveBeenCalledTimes(2)
   })
 
   it('renders the home view with completion and error actions', () => {
-    const onRetry = vi.fn(async () => undefined)
-    const onViewResults = vi.fn()
-    const { rerender } = render(
-      <HomeView
-        canStartSync
-        cleanupFeedItems={[]}
-        copiedCount={3}
-        deletedCount={1}
-        homeCounts={[
-          { label: 'Selected folders', value: '2' },
-          { label: 'Planned copies', value: '3' },
-          { label: 'Planned deletes', value: '1' },
-        ]}
-        homePanelClassName="panel highlight-panel runtime-panel runtime-panel--completed"
-        isPreviewing={false}
-        onPreview={async () => undefined}
-        onRetry={onRetry}
-        onStartSync={async () => undefined}
-        onStop={async () => undefined}
-        onViewResults={onViewResults}
-        previewStatusMessage="Preview scan completed."
-        processedCount={4}
-        processedTotal={4}
-        runState={{
-          isRunning: false,
-          itemProgress: 100,
-          overallProgress: 100,
-          lastMessage: 'Sync complete.',
-        }}
-        runtimeCanViewResults
-        runtimeCurrentDetail="C:\\"
-        runtimeCurrentTitle="Sync complete"
-        runtimeError={null}
-        runtimeErrorTitle="Update failed"
-        runtimeHeadline="Update completed."
-        runtimePhase="completed"
-        runtimeScope="sync"
-        syncTerminalEntries={[]}
-        transferFeedItems={[]}
-      />,
-    )
+    const handleRetryRuntimeAction = vi.fn(async () => undefined)
+    const handleViewResults = vi.fn()
+
+    const completedCtx = makeCtx({
+      homeCounts: [
+        { label: 'Selected folders', value: '2' },
+        { label: 'Planned copies', value: '3' },
+        { label: 'Planned deletes', value: '1' },
+      ],
+      homePanelClassName: 'panel highlight-panel runtime-panel runtime-panel--completed',
+      processedCount: 4,
+      processedTotal: 4,
+      runState: {
+        ...initialRunState,
+        isRunning: false,
+        itemProgress: 100,
+        overallProgress: 100,
+        copiedCount: 3,
+        deletedCount: 1,
+        lastMessage: 'Sync complete.',
+      },
+      runtimeCanViewResults: true,
+      runtimeCurrentDetail: 'C:\\',
+      runtimeCurrentTitle: 'Sync complete',
+      runtimeHeadline: 'Update completed.',
+      runtimePhase: 'completed',
+      runtimeScope: 'sync',
+      handleRetryRuntimeAction,
+      handleViewResults,
+    })
+
+    const { rerender } = renderWithCtx(<HomeView />, completedCtx)
 
     expect(screen.getByRole('button', { name: 'Run preview again' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Run update again' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View results' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'View results' }))
-    expect(onViewResults).toHaveBeenCalled()
+    expect(handleViewResults).toHaveBeenCalled()
+
+    const errorCtx = makeCtx({
+      homePanelClassName: 'panel highlight-panel runtime-panel runtime-panel--error',
+      runState: {
+        ...initialRunState,
+        isRunning: false,
+        lastMessage: 'Sync failed.',
+      },
+      runtimeCanViewResults: false,
+      runtimeCurrentDetail: 'Copy failed',
+      runtimeCurrentTitle: 'Update interrupted',
+      runtimeError: 'Disk write failed.',
+      runtimeErrorTitle: 'Update failed',
+      runtimeHeadline: 'Update stopped with an error.',
+      runtimePhase: 'error',
+      runtimeScope: 'sync',
+      handleRetryRuntimeAction,
+      handleViewResults,
+    })
 
     rerender(
-      <HomeView
-        canStartSync
-        cleanupFeedItems={[]}
-        copiedCount={0}
-        deletedCount={0}
-        homeCounts={[
-          { label: 'Selected folders', value: '2' },
-          { label: 'Planned copies', value: '0' },
-          { label: 'Planned deletes', value: '0' },
-        ]}
-        homePanelClassName="panel highlight-panel runtime-panel runtime-panel--error"
-        isPreviewing={false}
-        onPreview={async () => undefined}
-        onRetry={onRetry}
-        onStartSync={async () => undefined}
-        onStop={async () => undefined}
-        onViewResults={onViewResults}
-        previewStatusMessage="Preview scan completed."
-        processedCount={0}
-        processedTotal={0}
-        runState={{
-          isRunning: false,
-          itemProgress: 0,
-          overallProgress: 0,
-          lastMessage: 'Sync failed.',
-        }}
-        runtimeCanViewResults={false}
-        runtimeCurrentDetail="Copy failed"
-        runtimeCurrentTitle="Update interrupted"
-        runtimeError="Disk write failed."
-        runtimeErrorTitle="Update failed"
-        runtimeHeadline="Update stopped with an error."
-        runtimePhase="error"
-        runtimeScope="sync"
-        syncTerminalEntries={[]}
-        transferFeedItems={[]}
-      />,
+      <SyncRuntimeContext.Provider value={errorCtx}><HomeView /></SyncRuntimeContext.Provider>,
     )
 
     expect(screen.getByText('Disk write failed.')).toBeInTheDocument()
@@ -230,33 +238,24 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     fireEvent.click(screen.getByRole('button', { name: 'View logs' }))
 
-    expect(onRetry).toHaveBeenCalled()
+    expect(handleRetryRuntimeAction).toHaveBeenCalled()
   })
 
   it('renders the preview view with planned actions', () => {
-    render(
-      <PreviewView
-        canStartSync
-        isPreviewing={false}
-        onPreview={async () => undefined}
-        onRetry={async () => undefined}
-        onStartSync={async () => undefined}
-        onStopPreview={async () => undefined}
-        previewActions={{
-          copies: previewPlan.actions,
-          deletes: [],
-          skippedDeletes: [],
-        }}
-        previewCopyDetail="32 bytes copied to copy"
-        previewPlan={previewPlan}
-        previewStatusMessage="Preview scan completed."
-        previewTerminalEntries={[]}
-        runtimeBadgeTone="online"
-        runtimePhase="preview-ready"
-        runtimeScope="preview"
-        runtimeStatusLabel="Preview ready"
-      />,
-    )
+    renderWithCtx(<PreviewView />, makeCtx({
+      previewActions: {
+        copies: previewPlan.actions,
+        deletes: [],
+        skippedDeletes: [],
+      },
+      previewCopyDetail: '32 bytes copied to copy',
+      previewPlan,
+      previewStatusMessage: 'Preview scan completed.',
+      runtimeBadgeTone: 'online',
+      runtimePhase: 'preview-ready',
+      runtimeScope: 'preview',
+      runtimeStatusLabel: 'Preview ready',
+    }))
 
     expect(screen.getByRole('heading', { name: 'Planned file actions' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Files to copy' })).toBeInTheDocument()
@@ -264,82 +263,48 @@ describe('extracted views', () => {
   })
 
   it('renders the preview view empty, running, and error states', () => {
-    const { rerender } = render(
-      <PreviewView
-        canStartSync
-        isPreviewing={false}
-        onPreview={async () => undefined}
-        onRetry={async () => undefined}
-        onStartSync={async () => undefined}
-        onStopPreview={async () => undefined}
-        previewActions={{
-          copies: [],
-          deletes: [],
-          skippedDeletes: [],
-        }}
-        previewCopyDetail={undefined}
-        previewPlan={null}
-        previewStatusMessage="Ready to generate a preview."
-        previewTerminalEntries={[]}
-        runtimeBadgeTone="offline"
-        runtimePhase="idle"
-        runtimeScope={null}
-        runtimeStatusLabel="Idle"
-      />,
-    )
+    const { rerender } = renderWithCtx(<PreviewView />, makeCtx({
+      previewPlan: null,
+      previewStatusMessage: 'Ready to generate a preview.',
+      runtimeBadgeTone: 'offline',
+      runtimePhase: 'idle',
+      runtimeScope: null,
+      runtimeStatusLabel: 'Idle',
+    }))
 
     expect(screen.getByText('No preview available')).toBeInTheDocument()
 
+    const runningCtx = makeCtx({
+      isPreviewing: true,
+      previewPlan: null,
+      previewStatusMessage: 'Scanning folders.',
+      previewTerminalEntries: [{ line: 'Scanning CUSPAPPS', scope: 'preview', timestamp: '1' }],
+      runtimeBadgeTone: 'online',
+      runtimePhase: 'running',
+      runtimeScope: 'preview',
+      runtimeStatusLabel: 'Running',
+    })
+
     rerender(
-      <PreviewView
-        canStartSync
-        isPreviewing
-        onPreview={async () => undefined}
-        onRetry={async () => undefined}
-        onStartSync={async () => undefined}
-        onStopPreview={async () => undefined}
-        previewActions={{
-          copies: [],
-          deletes: [],
-          skippedDeletes: [],
-        }}
-        previewCopyDetail={undefined}
-        previewPlan={null}
-        previewStatusMessage="Scanning folders."
-        previewTerminalEntries={[{ line: 'Scanning CUSPAPPS', scope: 'preview', timestamp: '1' }]}
-        runtimeBadgeTone="online"
-        runtimePhase="running"
-        runtimeScope="preview"
-        runtimeStatusLabel="Running"
-      />,
+      <SyncRuntimeContext.Provider value={runningCtx}><PreviewView /></SyncRuntimeContext.Provider>,
     )
 
     expect(screen.getByRole('button', { name: 'Refreshing...' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(screen.getByText('Preview terminal')).toBeInTheDocument()
 
+    const errorCtx = makeCtx({
+      isPreviewing: false,
+      previewPlan: null,
+      previewStatusMessage: 'Preview failed.',
+      runtimeBadgeTone: 'offline',
+      runtimePhase: 'error',
+      runtimeScope: 'preview',
+      runtimeStatusLabel: 'Error',
+    })
+
     rerender(
-      <PreviewView
-        canStartSync
-        isPreviewing={false}
-        onPreview={async () => undefined}
-        onRetry={async () => undefined}
-        onStartSync={async () => undefined}
-        onStopPreview={async () => undefined}
-        previewActions={{
-          copies: [],
-          deletes: [],
-          skippedDeletes: [],
-        }}
-        previewCopyDetail={undefined}
-        previewPlan={null}
-        previewStatusMessage="Preview failed."
-        previewTerminalEntries={[]}
-        runtimeBadgeTone="offline"
-        runtimePhase="error"
-        runtimeScope="preview"
-        runtimeStatusLabel="Error"
-      />,
+      <SyncRuntimeContext.Provider value={errorCtx}><PreviewView /></SyncRuntimeContext.Provider>,
     )
 
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
@@ -347,59 +312,54 @@ describe('extracted views', () => {
   })
 
   it('renders the history view with persisted records', () => {
-    render(
-      <HistoryView
-        historyRecords={[
-          {
-            destinationRoot: 'C:\\',
-            enabledFolders: ['CUSPAPPS'],
-            errorMessage: null,
-            finishedAt: '1711839300000',
-            firmwareRetentionEnabled: false,
-            id: '1',
-            recentActions: ['Copied C:\\CUSPAPPS\\file.txt'],
-            selectedDrive: 'S',
-            sourceRoot: 'S:\\',
-            startedAt: '1711839200000',
-            status: 'completed',
-            summary: {
-              copiedBytesLabel: '32 bytes copied',
-              copiedFiles: 1,
-              deletedFiles: 0,
-              plannedCopyFiles: 1,
-              plannedDeleteFiles: 0,
-              plannedSkippedDeletes: 0,
-              skippedDeletes: 0,
-            },
+    renderWithCtx(<HistoryView />, makeCtx({
+      historyRecords: [
+        {
+          destinationRoot: 'C:\\',
+          enabledFolders: ['CUSPAPPS'],
+          errorMessage: null,
+          finishedAt: '1711839300000',
+          firmwareRetentionEnabled: false,
+          id: '1',
+          recentActions: ['Copied C:\\CUSPAPPS\\file.txt'],
+          selectedDrive: 'S',
+          sourceRoot: 'S:\\',
+          startedAt: '1711839200000',
+          status: 'completed',
+          summary: {
+            copiedBytesLabel: '32 bytes copied',
+            copiedFiles: 1,
+            deletedFiles: 0,
+            plannedCopyFiles: 1,
+            plannedDeleteFiles: 0,
+            plannedSkippedDeletes: 0,
+            skippedDeletes: 0,
           },
-        ]}
-        isHistoryLoading={false}
-        onRefreshHistory={async () => undefined}
-      />,
-    )
+        },
+      ],
+      isHistoryLoading: false,
+    }))
 
     expect(screen.getByText('Persistent local audit trail')).toBeInTheDocument()
     expect(screen.getByText('Copied 1')).toBeInTheDocument()
   })
 
   it('renders the folder selection view with save actions', () => {
-    const onApply = vi.fn(async () => undefined)
-    const onReset = vi.fn()
-    const onToggleFolder = vi.fn()
+    const handleApplySettings = vi.fn(async () => undefined)
+    const handleResetSettings = vi.fn()
+    const handleFolderToggle = vi.fn()
 
-    render(
-      <FolderSelectionView
-        appNotice="Settings saved."
-        draftSettings={buildDefaultSettings(getFolderDefinitions(), 'S')}
-        enabledFolderCount={2}
-        folderDefinitions={getFolderDefinitions()}
-        hasUnsavedChanges
-        isSaving={false}
-        onApply={onApply}
-        onReset={onReset}
-        onToggleFolder={onToggleFolder}
-      />,
-    )
+    renderWithCtx(<FolderSelectionView />, makeCtx({
+      appNotice: 'Settings saved.',
+      draftSettings: buildDefaultSettings(getFolderDefinitions(), 'S'),
+      enabledFolderCount: 2,
+      folderDefinitions: getFolderDefinitions(),
+      hasUnsavedChanges: true,
+      isSaving: false,
+      handleApplySettings,
+      handleResetSettings,
+      handleFolderToggle,
+    }))
 
     expect(screen.getByRole('heading', { name: 'Choose mirrored folders' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument()
@@ -408,26 +368,24 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     fireEvent.click(screen.getByRole('button', { name: 'TeamCF' }))
 
-    expect(onApply).toHaveBeenCalled()
-    expect(onReset).toHaveBeenCalled()
-    expect(onToggleFolder).toHaveBeenCalled()
+    expect(handleApplySettings).toHaveBeenCalled()
+    expect(handleResetSettings).toHaveBeenCalled()
+    expect(handleFolderToggle).toHaveBeenCalled()
   })
 
   it('renders the firmware retention view', () => {
-    const onApply = vi.fn(async () => undefined)
-    const onReset = vi.fn()
-    const onToggleRetention = vi.fn()
+    const handleApplySettings = vi.fn(async () => undefined)
+    const handleResetSettings = vi.fn()
+    const handleFirmwareRetentionToggle = vi.fn()
 
-    render(
-      <FirmwareRetentionView
-        firmwareRetentionEnabled
-        hasUnsavedChanges
-        isSaving={false}
-        onApply={onApply}
-        onReset={onReset}
-        onToggleRetention={onToggleRetention}
-      />,
-    )
+    renderWithCtx(<FirmwareRetentionView />, makeCtx({
+      draftSettings: { ...defaultSettings, firmwareRetentionEnabled: true },
+      hasUnsavedChanges: true,
+      isSaving: false,
+      handleApplySettings,
+      handleResetSettings,
+      handleFirmwareRetentionToggle,
+    }))
 
     expect(screen.getByText('Firmware retention enabled')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument()
@@ -436,54 +394,32 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(onToggleRetention).toHaveBeenCalled()
-    expect(onApply).toHaveBeenCalled()
-    expect(onReset).toHaveBeenCalled()
+    expect(handleFirmwareRetentionToggle).toHaveBeenCalled()
+    expect(handleApplySettings).toHaveBeenCalled()
+    expect(handleResetSettings).toHaveBeenCalled()
   })
 
   it('wires home view actions and collapsible sections', () => {
-    const onPreview = vi.fn(async () => undefined)
-    const onStartSync = vi.fn(async () => undefined)
+    const handlePreview = vi.fn(async () => undefined)
+    const handleStartSync = vi.fn(async () => undefined)
 
-    render(
-      <HomeView
-        canStartSync
-        cleanupFeedItems={[]}
-        copiedCount={0}
-        deletedCount={0}
-        homeCounts={[
-          { label: 'Selected folders', value: '2' },
-          { label: 'Planned copies', value: '0' },
-          { label: 'Planned deletes', value: '0' },
-        ]}
-        homePanelClassName="panel highlight-panel runtime-panel"
-        isPreviewing
-        onPreview={onPreview}
-        onRetry={async () => undefined}
-        onStartSync={onStartSync}
-        onStop={async () => undefined}
-        onViewResults={() => undefined}
-        previewStatusMessage="Scanning folders."
-        processedCount={0}
-        processedTotal={0}
-        runState={{
-          isRunning: false,
-          itemProgress: 0,
-          overallProgress: 0,
-          lastMessage: 'Idle',
-        }}
-        runtimeCanViewResults={false}
-        runtimeCurrentDetail="Waiting"
-        runtimeCurrentTitle="No active transfer"
-        runtimeError={null}
-        runtimeErrorTitle="Update failed"
-        runtimeHeadline="Preview is scanning."
-        runtimePhase="preview-ready"
-        runtimeScope="preview"
-        syncTerminalEntries={[]}
-        transferFeedItems={[]}
-      />,
-    )
+    renderWithCtx(<HomeView />, makeCtx({
+      homeCounts: [
+        { label: 'Selected folders', value: '2' },
+        { label: 'Planned copies', value: '0' },
+        { label: 'Planned deletes', value: '0' },
+      ],
+      homePanelClassName: 'panel highlight-panel runtime-panel',
+      isPreviewing: true,
+      previewStatusMessage: 'Scanning folders.',
+      runtimeCurrentDetail: 'Waiting',
+      runtimeCurrentTitle: 'No active transfer',
+      runtimeHeadline: 'Preview is scanning.',
+      runtimePhase: 'preview-ready',
+      runtimeScope: 'preview',
+      handlePreview,
+      handleStartSync,
+    }))
 
     expect(screen.getByRole('button', { name: 'Running preview...' })).toBeInTheDocument()
     expect(screen.getByText('Awaiting planner totals')).toBeInTheDocument()
@@ -495,68 +431,66 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Toggle New files' }))
     fireEvent.click(screen.getByRole('button', { name: 'Toggle Removed files' }))
 
-    expect(onPreview).toHaveBeenCalled()
-    expect(onStartSync).toHaveBeenCalled()
+    expect(handlePreview).toHaveBeenCalled()
+    expect(handleStartSync).toHaveBeenCalled()
   })
 
   it('wires preview view actions, panels, and terminal controls', () => {
-    const onPreview = vi.fn(async () => undefined)
-    const onStartSync = vi.fn(async () => undefined)
-    const onStopPreview = vi.fn(async () => undefined)
-    const onRetry = vi.fn(async () => undefined)
+    const handlePreview = vi.fn(async () => undefined)
+    const handleStartSync = vi.fn(async () => undefined)
+    const handleStopPreview = vi.fn(async () => undefined)
+    const handleRetryRuntimeAction = vi.fn(async () => undefined)
 
-    const { rerender } = render(
-      <PreviewView
-        canStartSync
-        isPreviewing={false}
-        onPreview={onPreview}
-        onRetry={onRetry}
-        onStartSync={onStartSync}
-        onStopPreview={onStopPreview}
-        previewActions={{
-          copies: previewPlan.actions,
-          deletes: [],
-          skippedDeletes: [],
-        }}
-        previewCopyDetail="32 bytes copied to copy"
-        previewPlan={previewPlan}
-        previewStatusMessage="Preview scan completed."
-        previewTerminalEntries={[]}
-        runtimeBadgeTone="online"
-        runtimePhase="preview-ready"
-        runtimeScope="preview"
-        runtimeStatusLabel="Ready"
-      />,
-    )
+    const readyCtx = makeCtx({
+      previewActions: {
+        copies: previewPlan.actions,
+        deletes: [],
+        skippedDeletes: [],
+      },
+      previewCopyDetail: '32 bytes copied to copy',
+      previewPlan,
+      previewStatusMessage: 'Preview scan completed.',
+      runtimeBadgeTone: 'online',
+      runtimePhase: 'preview-ready',
+      runtimeScope: 'preview',
+      runtimeStatusLabel: 'Ready',
+      handlePreview,
+      handleStartSync,
+      handleStopPreview,
+      handleRetryRuntimeAction,
+    })
+
+    const { rerender } = renderWithCtx(<PreviewView />, readyCtx)
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }))
     fireEvent.click(screen.getByRole('button', { name: 'Run update' }))
 
-    expect(onPreview).toHaveBeenCalled()
-    expect(onStartSync).toHaveBeenCalled()
+    expect(handlePreview).toHaveBeenCalled()
+    expect(handleStartSync).toHaveBeenCalled()
+
+    const runningCtx = makeCtx({
+      isPreviewing: true,
+      previewActions: {
+        copies: previewPlan.actions,
+        deletes: [],
+        skippedDeletes: [],
+      },
+      previewCopyDetail: '32 bytes copied to copy',
+      previewPlan,
+      previewStatusMessage: 'Scanning folders.',
+      previewTerminalEntries: [{ line: 'Scanning CUSPAPPS', scope: 'preview', timestamp: '1' }],
+      runtimeBadgeTone: 'online',
+      runtimePhase: 'running',
+      runtimeScope: 'preview',
+      runtimeStatusLabel: 'Running',
+      handlePreview,
+      handleStartSync,
+      handleStopPreview,
+      handleRetryRuntimeAction,
+    })
 
     rerender(
-      <PreviewView
-        canStartSync
-        isPreviewing
-        onPreview={onPreview}
-        onRetry={onRetry}
-        onStartSync={onStartSync}
-        onStopPreview={onStopPreview}
-        previewActions={{
-          copies: previewPlan.actions,
-          deletes: [],
-          skippedDeletes: [],
-        }}
-        previewCopyDetail="32 bytes copied to copy"
-        previewPlan={previewPlan}
-        previewStatusMessage="Scanning folders."
-        previewTerminalEntries={[{ line: 'Scanning CUSPAPPS', scope: 'preview', timestamp: '1' }]}
-        runtimeBadgeTone="online"
-        runtimePhase="running"
-        runtimeScope="preview"
-        runtimeStatusLabel="Running"
-      />,
+      <SyncRuntimeContext.Provider value={runningCtx}><PreviewView /></SyncRuntimeContext.Provider>,
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
@@ -566,58 +500,51 @@ describe('extracted views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Toggle Files to delete' }))
     fireEvent.click(screen.getByRole('button', { name: 'Toggle Skipped deletes' }))
 
-    expect(onStopPreview).toHaveBeenCalled()
+    expect(handleStopPreview).toHaveBeenCalled()
+
+    const errorCtx = makeCtx({
+      isPreviewing: false,
+      previewPlan: null,
+      previewStatusMessage: 'Preview failed.',
+      runtimeBadgeTone: 'offline',
+      runtimePhase: 'error',
+      runtimeScope: 'preview',
+      runtimeStatusLabel: 'Error',
+      handlePreview,
+      handleStartSync,
+      handleStopPreview,
+      handleRetryRuntimeAction,
+    })
 
     rerender(
-      <PreviewView
-        canStartSync
-        isPreviewing={false}
-        onPreview={onPreview}
-        onRetry={onRetry}
-        onStartSync={onStartSync}
-        onStopPreview={onStopPreview}
-        previewActions={{
-          copies: [],
-          deletes: [],
-          skippedDeletes: [],
-        }}
-        previewCopyDetail={undefined}
-        previewPlan={null}
-        previewStatusMessage="Preview failed."
-        previewTerminalEntries={[]}
-        runtimeBadgeTone="offline"
-        runtimePhase="error"
-        runtimeScope="preview"
-        runtimeStatusLabel="Error"
-      />,
+      <SyncRuntimeContext.Provider value={errorCtx}><PreviewView /></SyncRuntimeContext.Provider>,
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     fireEvent.click(screen.getByRole('button', { name: 'View logs' }))
 
-    expect(onRetry).toHaveBeenCalled()
+    expect(handleRetryRuntimeAction).toHaveBeenCalled()
   })
 
   it('renders history loading and empty states and refresh action', () => {
-    const onRefreshHistory = vi.fn(async () => undefined)
-    const { rerender } = render(
-      <HistoryView
-        historyRecords={[]}
-        isHistoryLoading
-        onRefreshHistory={onRefreshHistory}
-      />,
-    )
+    const refreshHistory = vi.fn(async () => undefined)
+
+    const { rerender } = renderWithCtx(<HistoryView />, makeCtx({
+      historyRecords: [],
+      isHistoryLoading: true,
+      refreshHistory,
+    }))
 
     expect(screen.getByText('Loading run history...')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Refresh history' }))
-    expect(onRefreshHistory).toHaveBeenCalled()
+    expect(refreshHistory).toHaveBeenCalled()
 
     rerender(
-      <HistoryView
-        historyRecords={[]}
-        isHistoryLoading={false}
-        onRefreshHistory={onRefreshHistory}
-      />,
+      <SyncRuntimeContext.Provider value={makeCtx({
+        historyRecords: [],
+        isHistoryLoading: false,
+        refreshHistory,
+      })}><HistoryView /></SyncRuntimeContext.Provider>,
     )
 
     expect(

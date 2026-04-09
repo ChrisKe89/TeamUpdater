@@ -6,51 +6,31 @@ import {
   StatCard,
   TerminalPanel,
 } from '../components/app-panels'
+import { useSyncRuntimeContext } from '../context/SyncRuntimeContext'
 import { formatTimestamp } from '../lib/runtime'
-import type { SyncPlan, TerminalEntry } from '../types'
 
-export interface PreviewViewProps {
-  canStartSync: boolean
-  isPreviewing: boolean
-  onPreview: () => Promise<void>
-  onRetry: () => Promise<void>
-  onStartSync: () => Promise<void>
-  onStopPreview: () => Promise<void>
-  previewActions: {
-    copies: SyncPlan['actions']
-    deletes: SyncPlan['actions']
-    skippedDeletes: SyncPlan['actions']
-  }
-  previewCopyDetail: string | undefined
-  previewPlan: SyncPlan | null
-  previewStatusMessage: string
-  previewTerminalEntries: TerminalEntry[]
-  runtimeBadgeTone: string
-  runtimePhase: 'idle' | 'preview-ready' | 'running' | 'completed' | 'error'
-  runtimeScope: 'preview' | 'sync' | null
-  runtimeStatusLabel: string
-}
+export function PreviewView() {
+  const {
+    canStartSync,
+    isPreviewing,
+    previewActions,
+    previewCopyDetail,
+    previewPlan,
+    previewStatusMessage,
+    previewTerminalEntries,
+    runtimeBadgeTone,
+    runtimePhase,
+    runtimeScope,
+    runtimeStatusLabel,
+    handlePreview,
+    handleRetryRuntimeAction,
+    handleStartSync,
+    handleStopPreview,
+  } = useSyncRuntimeContext()
 
-export function PreviewView({
-  canStartSync,
-  isPreviewing,
-  onPreview,
-  onRetry,
-  onStartSync,
-  onStopPreview,
-  previewActions,
-  previewCopyDetail,
-  previewPlan,
-  previewStatusMessage,
-  previewTerminalEntries,
-  runtimeBadgeTone,
-  runtimePhase,
-  runtimeScope,
-  runtimeStatusLabel,
-}: PreviewViewProps) {
-  const [isPreviewSummaryOpen, setIsPreviewSummaryOpen] = useState(true)   // starts open
+  const [isPreviewSummaryOpen, setIsPreviewSummaryOpen] = useState(true)
   const [isPreviewTerminalOpen, setIsPreviewTerminalOpen] = useState(false)
-  const [isPreviewCopiesOpen, setIsPreviewCopiesOpen] = useState(true)     // starts open
+  const [isPreviewCopiesOpen, setIsPreviewCopiesOpen] = useState(true)
   const [isPreviewDeletesOpen, setIsPreviewDeletesOpen] = useState(false)
   const [isPreviewSkippedOpen, setIsPreviewSkippedOpen] = useState(false)
 
@@ -83,7 +63,7 @@ export function PreviewView({
             <button
               className="secondary-button"
               disabled={!canStartSync || runtimePhase === 'running'}
-              onClick={() => void onPreview()}
+              onClick={() => void handlePreview()}
               type="button"
             >
               {isPreviewing ? 'Refreshing...' : 'Refresh preview'}
@@ -91,7 +71,7 @@ export function PreviewView({
             <button
               className="primary-button"
               disabled={!canStartSync || runtimePhase === 'running'}
-              onClick={() => void onStartSync()}
+              onClick={() => void handleStartSync()}
               type="button"
             >
               Run update
@@ -99,7 +79,7 @@ export function PreviewView({
             {runtimePhase === 'running' && runtimeScope === 'preview' ? (
               <button
                 className="utility-button utility-button--danger utility-button--strong"
-                onClick={() => void onStopPreview()}
+                onClick={() => void handleStopPreview()}
                 type="button"
               >
                 Stop
@@ -109,12 +89,16 @@ export function PreviewView({
               <>
                 <button
                   className="utility-button utility-button--danger utility-button--strong"
-                  onClick={() => void onRetry()}
+                  onClick={() => void handleRetryRuntimeAction()}
                   type="button"
                 >
                   Retry
                 </button>
-                <button className="utility-button" onClick={() => setIsPreviewTerminalOpen(true)} type="button">
+                <button
+                  className="utility-button"
+                  onClick={() => setIsPreviewTerminalOpen(true)}
+                  type="button"
+                >
                   View logs
                 </button>
               </>
@@ -172,7 +156,7 @@ export function PreviewView({
         entries={previewTerminalEntries}
         isCollapsible
         isOpen={isPreviewTerminalOpen}
-        onCancel={isPreviewing ? () => void onStopPreview() : undefined}
+        onCancel={isPreviewing ? () => void handleStopPreview() : undefined}
         onToggle={() => setIsPreviewTerminalOpen((previous) => !previous)}
         status={previewStatusMessage}
         title="Preview terminal"

@@ -1,20 +1,17 @@
-export interface FirmwareRetentionViewProps {
-  firmwareRetentionEnabled: boolean
-  hasUnsavedChanges: boolean
-  isSaving: boolean
-  onApply: () => Promise<void>
-  onReset: () => void
-  onToggleRetention: () => void
-}
+import { useSyncRuntimeContext } from '../context/SyncRuntimeContext'
 
-export function FirmwareRetentionView({
-  firmwareRetentionEnabled,
-  hasUnsavedChanges,
-  isSaving,
-  onApply,
-  onReset,
-  onToggleRetention,
-}: FirmwareRetentionViewProps) {
+export function FirmwareRetentionView() {
+  const {
+    draftSettings,
+    hasUnsavedChanges,
+    isSaving,
+    handleApplySettings,
+    handleFirmwareRetentionToggle,
+    handleResetSettings,
+  } = useSyncRuntimeContext()
+
+  const firmwareRetentionEnabled = draftSettings.firmwareRetentionEnabled
+
   return (
     <section className="panel settings-panel">
       <div className="panel-heading">
@@ -26,7 +23,7 @@ export function FirmwareRetentionView({
 
       <button
         className={`retention-card ${firmwareRetentionEnabled ? 'is-on' : ''}`}
-        onClick={onToggleRetention}
+        onClick={handleFirmwareRetentionToggle}
         type="button"
       >
         <div>
@@ -49,7 +46,7 @@ export function FirmwareRetentionView({
         <button
           className="primary-button"
           disabled={!hasUnsavedChanges || isSaving}
-          onClick={() => void onApply()}
+          onClick={() => void handleApplySettings()}
           type="button"
         >
           Apply
@@ -57,7 +54,7 @@ export function FirmwareRetentionView({
         <button
           className="secondary-button"
           disabled={!hasUnsavedChanges || isSaving}
-          onClick={onReset}
+          onClick={handleResetSettings}
           type="button"
         >
           Cancel

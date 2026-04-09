@@ -1,18 +1,10 @@
 import { LogList } from '../components/app-panels'
+import { useSyncRuntimeContext } from '../context/SyncRuntimeContext'
 import { formatTimestamp, statusTone } from '../lib/runtime'
-import type { RunAuditRecord } from '../types'
 
-export interface HistoryViewProps {
-  historyRecords: RunAuditRecord[]
-  isHistoryLoading: boolean
-  onRefreshHistory: () => Promise<void>
-}
+export function HistoryView() {
+  const { historyRecords, isHistoryLoading, refreshHistory } = useSyncRuntimeContext()
 
-export function HistoryView({
-  historyRecords,
-  isHistoryLoading,
-  onRefreshHistory,
-}: HistoryViewProps) {
   return (
     <section className="settings-panel">
       <section className="panel">
@@ -21,7 +13,7 @@ export function HistoryView({
             <p className="eyebrow">Run History</p>
             <h2>Persistent local audit trail</h2>
           </div>
-          <button className="secondary-button" onClick={() => void onRefreshHistory()} type="button">
+          <button className="secondary-button" onClick={() => void refreshHistory()} type="button">
             Refresh history
           </button>
         </div>
@@ -47,7 +39,6 @@ export function HistoryView({
                   {record.status}
                 </span>
               </div>
-
               <div className="history-section history-meta">
                 <span className="history-chip">
                   Drive {record.selectedDrive ? `${record.selectedDrive}:\\` : 'n/a'}
@@ -57,18 +48,15 @@ export function HistoryView({
                   Firmware retention {record.firmwareRetentionEnabled ? 'on' : 'off'}
                 </span>
               </div>
-
               <div className="history-section history-stats">
                 <span>Copied {record.summary.copiedFiles}</span>
                 <span>Deleted {record.summary.deletedFiles}</span>
                 <span>Skipped deletes {record.summary.skippedDeletes}</span>
                 <span>{record.summary.copiedBytesLabel || '0 bytes copied'}</span>
               </div>
-
               {record.errorMessage ? (
                 <div className="banner banner--error">{record.errorMessage}</div>
               ) : null}
-
               <div className="history-section">
                 <p className="history-section-title">Recent actions</p>
                 <LogList
