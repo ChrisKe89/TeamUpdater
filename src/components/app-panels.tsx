@@ -154,7 +154,7 @@ export function TerminalPanel({
       return
     }
 
-    terminalWindowRef.current.scrollTop = terminalWindowRef.current.scrollHeight
+    terminalWindowRef.current.scrollTop = 1e9
   }, [entries, isExpanded])
 
   return (
