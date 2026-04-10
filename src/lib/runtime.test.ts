@@ -211,4 +211,12 @@ describe('runtime helpers', () => {
     })
     expect(homeCounts.map((item) => item.value)).toEqual(['1', '5', '2'])
   })
+
+  it('ignores malformed feed items instead of crashing the renderer', () => {
+    const transferFeedItems = getTransferFeedItems(['C:\\A.txt', undefined as unknown as string], [
+      { line: 'Copying C:\\A.txt', scope: 'sync', timestamp: '1' },
+    ])
+
+    expect(transferFeedItems).toEqual(['C:\\A.txt', 'Copying C:\\A.txt'])
+  })
 })

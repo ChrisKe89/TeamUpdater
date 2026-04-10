@@ -135,7 +135,7 @@ pub enum SyncEventScope {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case", rename_all_fields = "camelCase", tag = "kind")]
 pub enum SyncEvent {
     PreviewStarted {
         message: String,
@@ -222,4 +222,51 @@ pub enum RunAuditStatus {
     Completed,
     Stopped,
     Failed,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn sync_event_fields_serialize_in_camel_case() {
+        let copied = serde_json::to_value(SyncEvent::FileCopied {
+            destination_path: r"C:\dest\file.txt".to_string(),
+            total_copied: 1,
+            message: "Copied file.".to_string(),
+        })
+        .expect("serialize file copied event");
+
+        assert_eq!(
+            copied,
+            json!({
+                "kind": "file_copied",
+                "destinationPath": r"C:\dest\file.txt",
+                "totalCopied": 1,
+                "message": "Copied file."
+            })
+        );
+
+        let progress = serde_json::to_value(SyncEvent::ItemProgress {
+            display_name: "file.txt".to_string(),
+            source_path: r"S:\source\file.txt".to_string(),
+            item_progress: 42.0,
+            overall_progress: 17.5,
+            message: "Copying file.".to_string(),
+        })
+        .expect("serialize item progress event");
+
+        assert_eq!(
+            progress,
+            json!({
+                "kind": "item_progress",
+                "displayName": "file.txt",
+                "sourcePath": r"S:\source\file.txt",
+                "itemProgress": 42.0,
+                "overallProgress": 17.5,
+                "message": "Copying file."
+            })
+        );
+    }
 }

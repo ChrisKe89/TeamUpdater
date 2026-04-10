@@ -117,6 +117,10 @@ export function dedupePreserveOrder(items: string[]) {
   const result: string[] = []
 
   for (const item of items) {
+    if (typeof item !== 'string') {
+      continue
+    }
+
     const normalized = item.trim()
     if (!normalized || seen.has(normalized)) {
       continue
